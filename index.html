@@ -14,9 +14,9 @@ h1{font-size:1.5rem;color:#4cc9f0;text-shadow:0 0 10px rgba(76,201,240,0.5)}
 .qr-area{text-align:center;font-size:0.8rem;color:#aaa;margin-bottom:8px}
 .qr-area a{color:#4cc9f0;word-break:break-all}
 .status-bar{display:flex;justify-content:space-between;background:rgba(0,0,0,0.3);padding:10px;border-radius:8px;margin-bottom:15px;font-size:0.9rem;flex-direction:column;gap:5px}
-.control-panel{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:15px}
+.control-panel{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:15px}
 .tip-box{background:rgba(247,37,133,0.2);border-left:4px solid #f72585;padding:10px;border-radius:4px;margin-bottom:15px;font-size:0.85rem;line-height:1.4}
-button{background:linear-gradient(to right,#4361ee,#3a0ca3);color:#fff;border:none;padding:12px;border-radius:8px;font-weight:bold;cursor:pointer;transition:all 0.3s;font-size:0.95rem}
+button{background:linear-gradient(to right,#4361ee,#3a0ca3);color:#fff;border:none;padding:8px 6px;border-radius:6px;font-weight:bold;cursor:pointer;transition:all 0.3s;font-size:0.82rem}
 button:active{transform:scale(0.98)}
 button:disabled{background:#555;cursor:not-allowed}
 button.danger{background:linear-gradient(to right,#e63946,#c1121f)}
@@ -35,11 +35,12 @@ input[type="number"]{width:60px;padding:8px;background:rgba(255,255,255,0.1);bor
 @keyframes pulse{0%{opacity:1}50%{opacity:0.5}100%{opacity:1}}
 .data-info{font-size:0.8rem;opacity:0.8}
 .chart-grid{display:grid;gap:15px;margin-bottom:15px}
-.chart-container{background:rgba(0,0,0,0.3);border-radius:8px;padding:10px;position:relative;height:220px}
-.chart-title{font-size:1rem;margin-bottom:8px;color:#72efdd;display:flex;justify-content:space-between;align-items:center}
-.chart-title .val{font-size:0.8rem;color:#aaa}
-.range-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
-.range-btn{padding:4px 10px;font-size:0.75rem;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:12px;color:#ccc;cursor:pointer}
+.chart-container{background:rgba(0,0,0,0.3);border-radius:8px;padding:8px;position:relative;height:220px}
+.range-bar{display:flex;gap:15px;flex-wrap:wrap;margin-bottom:12px;background:rgba(0,0,0,0.25);border-radius:8px;padding:8px 12px;align-items:center}
+.range-group{display:flex;align-items:center;gap:6px}
+.range-label{font-size:0.8rem;color:#aaa;white-space:nowrap}
+.range-row{display:flex;gap:4px;flex-wrap:wrap}
+.range-btn{padding:3px 8px;font-size:0.72rem;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:10px;color:#ccc;cursor:pointer}
 .range-btn.active{background:#4cc9f0;color:#000}
 footer{text-align:center;padding:15px;font-size:0.8rem;opacity:0.7;border-top:1px solid rgba(255,255,255,0.1);margin-top:15px}
 .log-box{width:100%;min-height:120px;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:10px;color:#a7f3d0;font-family:Consolas,monospace;font-size:11px;resize:vertical;margin-top:10px}
@@ -75,37 +76,6 @@ footer{text-align:center;padding:15px;font-size:0.8rem;opacity:0.7;border-top:1p
 <button id="clearBtn">新建会话</button>
 </div>
 
-<div class="chart-grid">
-<div class="chart-container">
-<div class="chart-title"><span>EEG 通道 1</span><span class="val" id="eeg1Val">-- uV</span></div>
-<div class="range-row" id="eeg1RangeRow"></div>
-<canvas id="eeg1Chart"></canvas>
-</div>
-<div class="chart-container">
-<div class="chart-title"><span>EEG 通道 2</span><span class="val" id="eeg2Val">-- uV</span></div>
-<div class="range-row" id="eeg2RangeRow"></div>
-<canvas id="eeg2Chart"></canvas>
-</div>
-<div class="chart-container">
-<div class="chart-title"><span>PPG 脉搏波</span><span class="val" id="ppgVal">--</span></div>
-<div class="range-row" id="ppgRangeRow"></div>
-<canvas id="ppgChart"></canvas>
-</div>
-<div class="chart-container">
-<div class="chart-title"><span>HR 心率</span><span class="val" id="hrVal">--</span></div>
-<div class="range-row" id="hrRangeRow"></div>
-<canvas id="hrChart"></canvas>
-</div>
-<div class="chart-container">
-<div class="chart-title"><span>三轴加速度</span><span class="val" id="accVal">X:-- Y:-- Z:--</span></div>
-<canvas id="accChart"></canvas>
-</div>
-<div class="chart-container">
-<div class="chart-title"><span>三轴陀螺仪</span><span class="val" id="gyroVal">X:-- Y:-- Z:--</span></div>
-<canvas id="gyroChart"></canvas>
-</div>
-</div>
-
 <div class="filter-panel">
 <div class="filter-group">
 <h3>EEG 滤波</h3>
@@ -129,6 +99,33 @@ footer{text-align:center;padding:15px;font-size:0.8rem;opacity:0.7;border-top:1p
 </div>
 
 <textarea class="log-box" id="logBox" readonly placeholder="运行日志..."></textarea>
+
+<div class="range-bar">
+<div class="range-group"><span class="range-label">EEG 量程</span><div class="range-row" id="eegRangeRow"></div></div>
+<div class="range-group"><span class="range-label">PPG/HR 量程</span><div class="range-row" id="physioRangeRow"></div></div>
+<div class="range-group"><button class="range-btn" id="gridToggleBtn">网格: 开</button></div>
+</div>
+
+<div class="chart-grid">
+<div class="chart-container">
+<canvas id="eeg1Chart"></canvas>
+</div>
+<div class="chart-container">
+<canvas id="eeg2Chart"></canvas>
+</div>
+<div class="chart-container">
+<canvas id="ppgChart"></canvas>
+</div>
+<div class="chart-container">
+<canvas id="hrChart"></canvas>
+</div>
+<div class="chart-container">
+<canvas id="accChart"></canvas>
+</div>
+<div class="chart-container">
+<canvas id="gyroChart"></canvas>
+</div>
+</div>
 
 <footer><p>基于 Web Bluetooth | 兼容 Chrome/Edge | 数据实时处理</p></footer>
 </div>
@@ -169,6 +166,23 @@ function uniqueStrings(arr) {
 }
 
 function hasProp(ch, props) { return props.some(p => ch.properties.includes(p)); }
+
+// ==================== 本地时间戳 ====================
+function localTimestamp() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const y = d.getFullYear();
+  const mo = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const h = pad(d.getHours());
+  const mi = pad(d.getMinutes());
+  const s = pad(d.getSeconds());
+  const offset = -d.getTimezoneOffset();
+  const sign = offset >= 0 ? '+' : '-';
+  const oh = pad(Math.floor(Math.abs(offset) / 60));
+  const om = pad(Math.abs(offset) % 60);
+  return `${y}-${mo}-${dd}T${h}:${mi}:${s}${sign}${oh}:${om}`;
+}
 
 // ==================== 前置检查 ====================
 function preCheck() {
@@ -338,9 +352,8 @@ const tEeg = buildTime(EEG_POINTS, EEG_FS);
 const DB_NAME = 'SleepBandDB', DB_VER = 1, STORE = 'logs';
 let db = null;
 let autoSaveTimer = null;
-const SAVE_INTERVAL = 3000; // 每 3 秒自动存一次
-let unsavedCount = 0;
-let savedChunks = 0; // 已保存的批次总数
+const SAVE_INTERVAL = 3000;
+let savedChunks = 0;
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -354,17 +367,16 @@ function openDB() {
   });
 }
 
-/** 把 rawLog 中尚未保存的条目写入 IndexedDB */
+/** 将 rawLog 全部写入 IndexedDB 后清空 rawLog（已保存数据不再保留） */
 async function flushLogs() {
-  if (!db || !rawLog.length || unsavedCount === 0) return;
-  const entries = rawLog.slice(-unsavedCount);
-  if (!entries.length) return;
+  if (!db || !rawLog.length) return;
+  const entries = rawLog.slice();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
     const store = tx.objectStore(STORE);
-    const chunk = { ts: Date.now(), lines: entries };
+    const chunk = { ts: localTimestamp(), lines: entries };
     store.add(chunk);
-    tx.oncomplete = () => { savedChunks++; resolve(); };
+    tx.oncomplete = () => { savedChunks++; rawLog = []; updateSaveStatus(); resolve(); };
     tx.onerror = () => reject(tx.error);
   });
 }
@@ -372,8 +384,8 @@ async function flushLogs() {
 function startAutoSave() {
   stopAutoSave();
   autoSaveTimer = setInterval(async () => {
-    if (!rawLog.length || !unsavedCount) return;
-    try { await flushLogs(); unsavedCount = 0; updateSaveStatus(); }
+    if (!rawLog.length) return;
+    try { await flushLogs(); }
     catch(e) { log(`自动保存失败: ${e.message}`); }
   }, SAVE_INTERVAL);
 }
@@ -421,29 +433,30 @@ async function clearDB() {
   });
 }
 
-/** 导出时合并内存 + 已存数据，生成完整文件 */
-async function prepareFullExport() {
-  await flushThenStop();
-  const chunks = await loadAllSaved();
-  const savedLines = chunks.flatMap(c => c.lines || []);
-  const allLines = rawLog.concat(savedLines);
-  // 去重（可能有重复条目）
-  const seen = new Set();
-  return allLines.filter(l => { const k = l.trim(); if (!k || seen.has(k)) return false; seen.add(k); return true; });
-}
-
-/** 页面加载时检查是否有旧数据 */
-async function checkSavedData() {
-  if (!db) return false;
-  const chunks = await loadAllSaved();
-  if (!chunks.length) return false;
-  const count = chunks.reduce((s, c) => s + (c.lines?.length||0), 0);
-  log(`发现 ${count} 条已保存数据（共 ${chunks.length} 批），点击「导出日志」可下载`);
-  return true;
+/** 导出：先 flush 到 DB，再读全量数据后清空 DB，保证导出无重复且只导出一次 */
+async function doExport() {
+  try {
+    stopAutoSave();
+    if (rawLog.length && db) await flushLogs();
+    const chunks = await loadAllSaved();
+    const lines = chunks.flatMap(c => c.lines || []);
+    if (!lines.length) { log('无数据可导出'); if (S.collecting) startAutoSave(); return; }
+    await clearDB();
+    const content = lines.join('\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sleep_band_${localTimestamp().replace(/[:.]/g,'-')}.txt`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    log(`导出 ${lines.length} 条记录，缓存已清空`);
+    if (S.collecting) startAutoSave();
+  } catch(e) { log(`导出失败: ${e.message}`); if (S.collecting) startAutoSave(); }
 }
 
 // ==================== 图表 ====================
-function makeChart(id, labels, datasets, unit) {
+function makeChart(id, labels, datasets, unit, title) {
   return new Chart(document.getElementById(id), {
     type: 'line',
     data: { labels, datasets },
@@ -454,43 +467,74 @@ function makeChart(id, labels, datasets, unit) {
       plugins: { legend: { display: datasets.length > 1, labels: { color: '#aaa', boxWidth: 10 } } },
       elements: { point: { radius: 0 }, line: { borderWidth: 1.5, tension: 0 } },
       scales: {
-        x: { type: 'linear', min: -SHOW_SECONDS, max: 0, ticks: { callback: v => v + 's', color: '#888', maxTicksLimit: 5 }, grid: { color: 'rgba(255,255,255,0.05)' } },
-        y: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+        x: { type: 'linear', min: -SHOW_SECONDS, max: 0,
+          ticks: { stepSize: 0.1, autoSkip: false, maxTicksLimit: 200,
+            callback: function(v) { return Number.isInteger(v) ? v + 's' : ''; },
+            color: function(ctx) { return ctx.tick && Number.isInteger(ctx.tick.value) ? '#bbb' : 'transparent'; },
+            font: function(ctx) { if (ctx.tick && Number.isInteger(ctx.tick.value)) return { weight: 'bold', size: 10 }; return {}; }
+          },
+          grid: { color: function(ctx) {
+            if (ctx.tick && Number.isInteger(ctx.tick.value)) return 'rgba(255,255,255,0.2)';
+            return 'rgba(255,255,255,0.05)';
+          }, lineWidth: function(ctx) {
+            return ctx.tick && Number.isInteger(ctx.tick.value) ? 1.5 : 0.5;
+          }, drawBorder: false
+          }
+        },
+        y: { title: { display: true, text: title, color: '#72efdd', font: { size: 11 } }, ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.08)' } }
       }
     }
   });
 }
 
 const charts = {
-  eeg1: makeChart('eeg1Chart', tEeg, [{label:'Ch1',data:[],borderColor:'#f59e0b'}], 'uV'),
-  eeg2: makeChart('eeg2Chart', tEeg, [{label:'Ch2',data:[],borderColor:'#06b6d4'}], 'uV'),
-  ppg: makeChart('ppgChart', tOther, [{label:'PPG',data:[],borderColor:'#0ea5e9'}], ''),
-  hr: makeChart('hrChart', tOther, [{label:'HR',data:[],borderColor:'#ec4899'}], ''),
+  eeg1: makeChart('eeg1Chart', tEeg, [{label:'Ch1',data:[],borderColor:'#f59e0b'}], 'uV', 'EEG 1'),
+  eeg2: makeChart('eeg2Chart', tEeg, [{label:'Ch2',data:[],borderColor:'#06b6d4'}], 'uV', 'EEG 2'),
+  ppg: makeChart('ppgChart', tOther, [{label:'PPG',data:[],borderColor:'#0ea5e9'}], '', 'PPG'),
+  hr: makeChart('hrChart', tOther, [{label:'HR',data:[],borderColor:'#ec4899'}], '', 'HR'),
   acc: makeChart('accChart', tOther, [
     {label:'X',data:[],borderColor:'#ef4444'},{label:'Y',data:[],borderColor:'#22c55e'},{label:'Z',data:[],borderColor:'#3b82f6'}
-  ], ''),
+  ], '', 'ACC'),
   gyro: makeChart('gyroChart', tOther, [
     {label:'X',data:[],borderColor:'#f59e0b'},{label:'Y',data:[],borderColor:'#14b8a6'},{label:'Z',data:[],borderColor:'#a855f7'}
-  ], '')
+  ], '', 'GYRO')
 };
 
-function setRange(chart, y) {
-  chart.options.scales.y.min = -y; chart.options.scales.y.max = y;
-  chart.update('none');
+function setEegRange(y) {
+  charts.eeg1.options.scales.y.min = -y; charts.eeg1.options.scales.y.max = y;
+  charts.eeg2.options.scales.y.min = -y; charts.eeg2.options.scales.y.max = y;
+  charts.eeg1.update('none'); charts.eeg2.update('none');
 }
-function makeRangeBtns(containerId, chart) {
+function setPhysioRange(y) {
+  charts.ppg.options.scales.y.min = -y; charts.ppg.options.scales.y.max = y;
+  charts.hr.options.scales.y.min = -y; charts.hr.options.scales.y.max = y;
+  charts.ppg.update('none'); charts.hr.update('none');
+}
+function makeMergedRangeBtns(containerId, setFn) {
   const root = document.getElementById(containerId);
   RANGE_VALUES.forEach(v => {
     const b = document.createElement('button');
     b.className = 'range-btn'; b.textContent = v;
-    b.onclick = () => setRange(chart, v);
+    b.onclick = () => setFn(v);
     root.appendChild(b);
   });
 }
-makeRangeBtns('eeg1RangeRow', charts.eeg1);
-makeRangeBtns('eeg2RangeRow', charts.eeg2);
-makeRangeBtns('ppgRangeRow', charts.ppg);
-makeRangeBtns('hrRangeRow', charts.hr);
+makeMergedRangeBtns('eegRangeRow', setEegRange);
+makeMergedRangeBtns('physioRangeRow', setPhysioRange);
+
+let gridVisible = true;
+function toggleGrid() {
+  gridVisible = !gridVisible;
+  const btn = document.getElementById('gridToggleBtn');
+  btn.textContent = gridVisible ? '网格: 开' : '网格: 关';
+  btn.classList.toggle('active', !gridVisible);
+  Object.values(charts).forEach(ch => {
+    ch.options.scales.x.grid.display = gridVisible;
+    ch.options.scales.y.grid.display = gridVisible;
+    ch.update('none');
+  });
+}
+document.getElementById('gridToggleBtn').onclick = toggleGrid;
 
 function toPoints(arr, len) {
   const n = arr.length;
@@ -577,12 +621,6 @@ function onImuData(rows) {
   bufs.gyroZ.pushBatch(apply(gz, filters.gyroZHp));
   bufs.ppg.pushBatch(apply(ppg, filters.ppgHp));
   bufs.hr.pushBatch(apply(hr, filters.hrHp));
-
-  const last = r[r.length-1];
-  document.getElementById('accVal').textContent = `X:${last[0].toFixed(1)} Y:${last[1].toFixed(1)} Z:${last[2].toFixed(1)}`;
-  document.getElementById('gyroVal').textContent = `X:${last[3].toFixed(1)} Y:${last[4].toFixed(1)} Z:${last[5].toFixed(1)}`;
-  document.getElementById('ppgVal').textContent = last[6].toFixed(0);
-  document.getElementById('hrVal').textContent = last[7].toFixed(0);
   scheduleRedraw();
 }
 
@@ -595,9 +633,6 @@ function onEegData(rows) {
   e2 = apply(apply(apply(e2, filters.eeg2Hp), filters.eeg2Lp), filters.eeg2Notch);
   bufs.eeg1.pushBatch(e1);
   bufs.eeg2.pushBatch(e2);
-  const last = r[r.length-1];
-  document.getElementById('eeg1Val').textContent = last[0].toFixed(1) + ' uV';
-  document.getElementById('eeg2Val').textContent = last[1].toFixed(1) + ' uV';
   scheduleRedraw();
 }
 
@@ -612,9 +647,8 @@ function updateUI() {
 }
 
 function log(msg) {
-  const t = new Date().toLocaleTimeString();
   const box = document.getElementById('logBox');
-  box.value += `[${t}] ${msg}\n`;
+  box.value += `[${localTimestamp()}] ${msg}\n`;
   box.scrollTop = box.scrollHeight;
 }
 
@@ -714,8 +748,7 @@ let lastDataInfo = '';
 function onData(ev) {
   const bytes = Array.from(new Uint8Array(ev.target.value.buffer));
   if (!bytes.length) return;
-  rawLog.push(`${new Date().toISOString()},${bytesToHex(bytes)}`);
-  unsavedCount++;
+  rawLog.push(`${localTimestamp()},${bytesToHex(bytes)}`);
 
   try {
     if (bytes[0] === 0xD0) {
@@ -732,26 +765,9 @@ function onData(ev) {
   document.getElementById('dataInfo').childNodes[0].textContent = lastDataInfo;
 }
 
-async function doExport() {
-  try {
-    const lines = await prepareFullExport();
-    if (!lines.length) { log('无数据可导出'); return; }
-    const content = lines.join('\n');
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `sleep_band_${new Date().toISOString().replace(/[:.]/g,'-')}.txt`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
-    log(`导出 ${lines.length} 条记录`);
-  } catch(e) { log(`导出失败: ${e.message}`); }
-}
-
 async function clearSession() {
   if (!confirm('确定要清除所有已保存的数据吗？此操作不可恢复。')) return;
   rawLog = []; S.imuPkt = 0; S.eegPkt = 0;
-  unsavedCount = 0;
   await clearDB(); stopAutoSave();
   document.getElementById('dataInfo').childNodes[0].textContent = '等待数据...';
   log('会话已清除');
@@ -790,7 +806,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateUI();
 
   try { await openDB(); log('IndexedDB 打开成功'); } catch(e) { log(`IndexedDB 打开失败: ${e.message}`); }
-  try { await checkSavedData(); } catch(e) { /* 忽略 */ }
 
   log('页面已加载，点击扫描设备');
 
