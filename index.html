@@ -137,8 +137,44 @@ const EEG_POINTS = EEG_FS * SHOW_SECONDS;
 const OTHER_POINTS = OTHER_FS * SHOW_SECONDS;
 const VREF = 4.5, GAIN = 6;
 const LSB = (2 * VREF / GAIN) / (2 ** 24);
-const START_CMD = new Uint8Array([0xAA,0xAA,0x03,0x11,0x00,0x00,0x00]);
-const STOP_CMD = new Uint8Array([0xAA,0xAA,0x03,0x12,0x00,0x00,0x00]);
+// 命令定义 - 根据设备类型选择
+const COMMANDS = {
+  SLEEP_BAND: {  // 蓝牙名称包含 CONIX_SLEEP_BAND
+    START_COLLECT: new Uint8Array([0xAA,0xAA,0x03,0x11,0x00,0x00,0x00]),
+    STOP_COLLECT: new Uint8Array([0xAA,0xAA,0x03,0x12,0x00,0x00,0x00]),
+  },
+  SLEEP_EASY: {  // 蓝牙名称包含 CONIX_SLEEP_EASY
+    START_COLLECT: new Uint8Array([0xAA,0xAA,0x01,0x03,0x00,0x00,0x00]),
+    STOP_COLLECT: new Uint8Array([0xAA,0xAA,0x01,0x04,0x00,0x00,0x00]),
+  }
+};
+
+/** 根据设备名称判断设备类型 */
+function getDeviceType(deviceName) {
+  if (!deviceName) return 'SLEEP_BAND';
+  if (deviceName.includes('CONIX_SLEEP_EASY')) return 'SLEEP_EASY';
+  if (deviceName.includes('CONIX_SLEEP_BAND')) return 'SLEEP_BAND';
+  return 'SLEEP_BAND';
+}
+
+/** 根据设备名称获取对应的命令 */
+function getCommand(deviceName, commandType) {
+  const deviceType = getDeviceType(deviceName);
+  return COMMANDS[deviceType][commandType] || COMMANDS.SLEEP_BAND[commandType];
+}
+
+/** 创建时钟同步命令 */
+function createSyncTimeCmd() {
+  const timestamp = Math.floor(Date.now() / 1000);
+  const cmd = new Uint8Array(15);
+  cmd[0] = 0xAA; cmd[1] = 0xAA; cmd[2] = 0x01; cmd[3] = 0x06; cmd[4] = 0x08;
+  cmd[5] = timestamp & 0xFF;
+  cmd[6] = (timestamp >> 8) & 0xFF;
+  cmd[7] = (timestamp >> 16) & 0xFF;
+  cmd[8] = (timestamp >> 24) & 0xFF;
+  for (let i = 9; i < 15; i++) cmd[i] = 0x00;
+  return cmd;
+}
 const RANGE_VALUES = [10,50,100,200,500,1000,2000,10000];
 const CANDIDATE_SVCS = [
   "000000ff-0000-1000-8000-00805f9b34fb",
@@ -326,6 +362,7 @@ function parse185Buffer(buf) {
 // ==================== 状态 ====================
 const S = {
   device: null, server: null, notifyCh: null, writeCh: null,
+  deviceName: null,  // 保存设备名称用于命令选择
   connected: false, collecting: false,
   imuBuf: [], eegBuf: [], rawLogs: [],
   imuPkt: 0, eegPkt: 0,
@@ -659,6 +696,7 @@ async function doScan(scanAll) {
       : { filters: [{ namePrefix: 'CONIX' }], optionalServices: CANDIDATE_SVCS };
     const d = await navigator.bluetooth.requestDevice(opts);
     S.device = d;
+    S.deviceName = d.name || null;  // 保存设备名称
     d.addEventListener('gattserverdisconnected', onDC);
     log(`找到设备: ${d.name||'未知'}`);
     updateUI();
@@ -669,6 +707,20 @@ async function doScan(scanAll) {
     else if (e.name === 'NotAllowedError') msg += '用户取消了选择';
     else msg += e.message;
     log(msg);
+  }
+}
+
+/** 发送时钟同步命令 */
+async function sendSyncTime() {
+  if (!S.writeCh) return;
+  try {
+    const cmd = createSyncTimeCmd();
+    const timestamp = Math.floor(Date.now() / 1000);
+    if (S.writeCh.writeValueWithoutResponse) await S.writeCh.writeValueWithoutResponse(cmd);
+    else await S.writeCh.writeValue(cmd);
+    log(`时钟同步命令已发送，时间戳: ${timestamp} (0x${timestamp.toString(16).toUpperCase().padStart(8, '0')})`);
+  } catch(e) {
+    log(`发送时钟同步命令失败: ${e.message}`);
   }
 }
 
@@ -701,8 +753,12 @@ async function doConnect() {
     if (!S.notifyCh && !S.writeCh) throw new Error('未找到可用特征');
     if (S.notifyCh) { await S.notifyCh.startNotifications(); S.notifyCh.addEventListener('characteristicvaluechanged', onData); }
     if (!S.writeCh) S.writeCh = S.notifyCh;
+    
+    await sendSyncTime();
+    
+    const deviceType = getDeviceType(S.deviceName);
     S.connected = true;
-    log('蓝牙连接成功');
+    log(`蓝牙连接成功，设备类型: ${deviceType}`);
     updateUI();
   } catch (e) {
     log(`连接失败: ${e.message}`);
@@ -723,11 +779,12 @@ async function doDisconnect() {
 async function doStart() {
   if (!S.writeCh) return;
   try {
-    if (S.writeCh.writeValueWithoutResponse) await S.writeCh.writeValueWithoutResponse(START_CMD);
-    else await S.writeCh.writeValue(START_CMD);
+    const cmd = getCommand(S.deviceName, 'START_COLLECT');
+    if (S.writeCh.writeValueWithoutResponse) await S.writeCh.writeValueWithoutResponse(cmd);
+    else await S.writeCh.writeValue(cmd);
     S.collecting = true;
     startAutoSave();
-    log('开始采集');
+    log(`开始采集 (设备类型: ${getDeviceType(S.deviceName)})`);
     updateUI();
   } catch(e) { log(`开始失败: ${e.message}`); }
 }
@@ -735,8 +792,9 @@ async function doStart() {
 async function doStop() {
   if (!S.writeCh) return;
   try {
-    if (S.writeCh.writeValueWithoutResponse) await S.writeCh.writeValueWithoutResponse(STOP_CMD);
-    else await S.writeCh.writeValue(STOP_CMD);
+    const cmd = getCommand(S.deviceName, 'STOP_COLLECT');
+    if (S.writeCh.writeValueWithoutResponse) await S.writeCh.writeValueWithoutResponse(cmd);
+    else await S.writeCh.writeValue(cmd);
     await flushThenStop();
     S.collecting = false;
     log('停止采集');
