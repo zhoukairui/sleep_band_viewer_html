@@ -206,18 +206,19 @@ function hasProp(ch, props) { return props.some(p => ch.properties.includes(p));
 // ==================== 本地时间戳 ====================
 function localTimestamp() {
   const d = new Date();
-  const pad = n => String(n).padStart(2, '0');
+  const pad = (n, w=2) => String(n).padStart(w, '0');
   const y = d.getFullYear();
   const mo = pad(d.getMonth() + 1);
   const dd = pad(d.getDate());
   const h = pad(d.getHours());
   const mi = pad(d.getMinutes());
   const s = pad(d.getSeconds());
+  const ms = pad(d.getMilliseconds(), 3);
   const offset = -d.getTimezoneOffset();
   const sign = offset >= 0 ? '+' : '-';
   const oh = pad(Math.floor(Math.abs(offset) / 60));
   const om = pad(Math.abs(offset) % 60);
-  return `${y}-${mo}-${dd}T${h}:${mi}:${s}${sign}${oh}:${om}`;
+  return `${y}-${mo}-${dd}T${h}:${mi}:${s}.${ms}${sign}${oh}:${om}`;
 }
 
 // ==================== 前置检查 ====================
