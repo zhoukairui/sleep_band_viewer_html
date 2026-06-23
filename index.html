@@ -235,7 +235,7 @@ function preCheck() {
     tips.push('非 HTTPS 环境，需通过 HTTPS 或 localhost 访问');
   }
   if (/iPhone|iPad/i.test(navigator.userAgent)) {
-    tips.push('iOS 设备：请使用 Chrome/Edge 而非 Safari，并确保已开启蓝牙权限');
+    tips.push('iOS 设备：可安装第三方 App「Bluefy」或「WebBLE」来运行 Web Bluetooth 页面');
   } else if (/Android/i.test(navigator.userAgent)) {
     tips.push('Android 设备：请确保已给浏览器开启位置信息和蓝牙权限');
   }
