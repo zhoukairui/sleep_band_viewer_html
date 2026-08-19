@@ -1,882 +1,1684 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+<!--
+  sleep_data_viewer_v3.html
+  v3: 在 v2 基础上增加本地 txt 文件加载和波形回放功能
+  - 实时模式：Web Bluetooth 连接设备实时采集
+  - 回放模式：加载 v2 导出的 raw txt 文件，按帧回放波形
+  支持播放/暂停/停止/进度拖动/速度调节
+-->
+<!--
+  睡眠头环数据可视化 (单文件 HTML 版)
+  基于 Python v2 脚本 (sleep_data_viewer_GUI_v2.py) 功能，协议设备码 0x06。
+  使用 Web Bluetooth API 连接真实设备，Canvas 2D 绘制波形。
+
+  浏览器兼容性：
+    - 仅 Chrome / Edge (桌面版) 支持 Web Bluetooth API
+    - 必须通过 HTTPS 或 http://localhost 访问（本机用 python -m http.server 启动）
+    - 系统 BLE 选择器由浏览器提供，需用户手动选择 CONIX_SLEEP 设备
+
+  使用方法：
+    1. 在本目录执行： python -m http.server 8000
+    2. 浏览器打开： http://localhost:8000/sleep_data_viewer.html
+    3. 点击"扫描设备" → 系统 BLE 选择器选择 CONIX_SLEEP 设备
+    4. 点击"连接设备" → 状态灯变绿后点击"开始采集"
+    5. 调整量程/间距/显示模式/滤波，观察波形
+    6. "停止采集"后可"导出CSV"
+-->
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>睡眠手环数据监测</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>睡眠头环数据可视化 v2 (协议0x06)</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',Arial,sans-serif}
-body{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);color:#e6e6e6;min-height:100vh;padding:10px}
-.container{max-width:100%;margin:0 auto}
-header{text-align:center;padding:15px 0;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:15px}
-h1{font-size:1.5rem;color:#4cc9f0;text-shadow:0 0 10px rgba(76,201,240,0.5)}
-.qr-area{text-align:center;font-size:0.8rem;color:#aaa;margin-bottom:8px}
-.qr-area a{color:#4cc9f0;word-break:break-all}
-.status-bar{display:flex;justify-content:space-between;background:rgba(0,0,0,0.3);padding:10px;border-radius:8px;margin-bottom:15px;font-size:0.9rem;flex-direction:column;gap:5px}
-.control-panel{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:15px}
-.tip-box{background:rgba(247,37,133,0.2);border-left:4px solid #f72585;padding:10px;border-radius:4px;margin-bottom:15px;font-size:0.85rem;line-height:1.4}
-button{background:linear-gradient(to right,#4361ee,#3a0ca3);color:#fff;border:none;padding:8px 6px;border-radius:6px;font-weight:bold;cursor:pointer;transition:all 0.3s;font-size:0.82rem}
-button:active{transform:scale(0.98)}
-button:disabled{background:#555;cursor:not-allowed}
-button.danger{background:linear-gradient(to right,#e63946,#c1121f)}
-button.success{background:linear-gradient(to right,#2ec4b6,#007f5f)}
-.filter-panel{background:rgba(0,0,0,0.3);border-radius:8px;padding:15px;margin-bottom:15px}
-.filter-group{margin-bottom:15px}
-.filter-group:last-child{margin-bottom:0}
-.filter-group h3{font-size:1rem;margin-bottom:8px;color:#f72585}
-.filter-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.filter-btn{padding:8px 12px;background:rgba(255,255,255,0.1);font-size:0.85rem;border:none;border-radius:8px;color:#e6e6e6;cursor:pointer}
-.filter-btn.active{background:linear-gradient(to right,#f72585,#b5179e)}
-input[type="number"]{width:60px;padding:8px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.3);border-radius:5px;color:#fff}
-.connection-status{display:inline-flex;align-items:center;gap:5px}
-.status-dot{width:10px;height:10px;border-radius:50%;background:#ff4757}
-.status-dot.connected{background:#2ed573;animation:pulse 2s infinite}
-@keyframes pulse{0%{opacity:1}50%{opacity:0.5}100%{opacity:1}}
-.data-info{font-size:0.8rem;opacity:0.8}
-.chart-grid{display:grid;gap:15px;margin-bottom:15px}
-.chart-container{background:rgba(0,0,0,0.3);border-radius:8px;padding:8px;position:relative;height:220px}
-.range-bar{display:flex;gap:15px;flex-wrap:wrap;margin-bottom:12px;background:rgba(0,0,0,0.25);border-radius:8px;padding:8px 12px;align-items:center}
-.range-group{display:flex;align-items:center;gap:6px}
-.range-label{font-size:0.8rem;color:#aaa;white-space:nowrap}
-.range-row{display:flex;gap:4px;flex-wrap:wrap}
-.range-btn{padding:3px 8px;font-size:0.72rem;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:10px;color:#ccc;cursor:pointer}
-.range-btn.active{background:#4cc9f0;color:#000}
-footer{text-align:center;padding:15px;font-size:0.8rem;opacity:0.7;border-top:1px solid rgba(255,255,255,0.1);margin-top:15px}
-.log-box{width:100%;min-height:120px;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:10px;color:#a7f3d0;font-family:Consolas,monospace;font-size:11px;resize:vertical;margin-top:10px}
+  /* ============ 科技风格深色主题 ============ */
+  :root{
+    --bg:#0a0e1a;        /* 深空黑 */
+    --grid:#1a3a5c;      /* 暗青网格 */
+    --panel:#0f1a2e;     /* 面板背景 */
+    --text:#00ffcc;      /* 主文本青 */
+    --accent:#ffaa00;    /* 强调橙 */
+    --eeg1:#00ffff;      /* 霓虹青 */
+    --eeg2:#ff00ff;      /* 霓虹紫 */
+    --ppg1:#00ff88;      /* 翠绿 */
+    --ppg2:#ffff00;      /* 黄 */
+    --accx:#ff5555;      --accy:#55ff55;      --accz:#5599ff;
+    --gyrox:#ffaa00;     --gyroy:#ffff00;     --gyroz:#aa00ff;
+    --warn:#ff3344;      /* 警告红 */
+    --btn-bg:#1a2a4a;
+    --btn-hover:#2a4a7a;
+    --btn-press:#0a1a3a;
+    --btn-checked-bg:#0a4a4a;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:"Microsoft YaHei","Consolas",monospace;
+    font-size:14px;
+    overflow:auto;
+    padding:12px;
+  }
+  .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px;}
+  .group{
+    border:1px solid var(--grid);
+    border-radius:6px;
+    padding:8px 14px;
+    color:var(--accent);
+    font-weight:bold;
+    display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+  }
+  .group > label:first-child{color:var(--accent); font-weight:bold;}
+  button.tech{
+    background:var(--btn-bg);
+    color:var(--text);
+    border:1px solid var(--grid);
+    padding:7px 14px;
+    border-radius:3px;
+    font-family:inherit;
+    font-size:13px;
+    cursor:pointer;
+    min-height:30px;
+  }
+  button.tech:hover{background:var(--btn-hover); border-color:var(--accent);}
+  button.tech:active{background:var(--btn-press);}
+  button.tech:disabled{color:#4a5a7a; background:#0a1a2e; cursor:not-allowed;}
+  button.tech.checked, button.tech.active{
+    background:var(--btn-checked-bg);
+    border:1px solid var(--eeg1);
+    color:var(--eeg1);
+  }
+  button.amp{min-width:48px; padding:7px 6px;}
+  input.amp-input{
+    background:#0f1a2e;
+    color:var(--accent);
+    border:1px solid var(--grid);
+    padding:4px 6px;
+    border-radius:2px;
+    font-family:inherit;
+    font-size:13px;
+    width:56px;
+  }
+  select.tech, input.tech{
+    background:#0f1a2e;
+    color:var(--text);
+    border:1px solid var(--grid);
+    padding:5px 8px;
+    border-radius:2px;
+    font-family:inherit;
+    font-size:14px;
+  }
+  input[type=number]{width:54px;}
+  .canvas-box{
+    border:1px solid var(--grid);
+    border-radius:6px;
+    background:var(--bg);
+    margin-top:10px;
+    padding:8px;
+    position:relative;
+  }
+  canvas{display:block; width:100%;}
+  .ctrl-bar{
+    display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    margin-bottom:6px; font-size:13px;
+  }
+  .ctrl-bar .lbl{color:var(--accent);}
+  #imu-row{display:flex; gap:10px; margin-top:10px;}
+  #imu-row > div{flex:1 1 50%; min-width:0;}
+  #status-bar{
+    position:fixed; left:0; right:0; bottom:0;
+    background:#0f1a2e;
+    border-top:1px solid var(--grid);
+    color:var(--text);
+    font-size:13px;
+    padding:4px 8px;
+    display:flex; gap:10px; align-items:center;
+    z-index:10;
+  }
+  #conn-dot{font-size:16px; font-weight:bold; line-height:1;}
+  #log{max-height:80px; overflow:auto; font-size:12px; color:#7accbb; background:#070b14; border:1px solid var(--grid); border-radius:3px; padding:4px; margin-top:4px; white-space:pre-wrap;}
+  .spacer{flex:1;}
+  .title{color:#fff; font-size:18px; font-weight:bold; margin-right:8px; margin-bottom:4px; display:block;}
+  .hint{color:#5a6a8a; font-size:11px;}
 </style>
 </head>
 <body>
-<div class="container">
-<header><h1>睡眠手环数据监测</h1></header>
 
-<div class="qr-area" id="qrArea"></div>
+<div class="title">睡眠头环数据可视化 v3 · 实时采集 + 文件回放 (协议 0x06)</div>
 
-<div class="tip-box" id="preCheckTip"></div>
-
-<div class="status-bar">
-<div class="connection-status">
-<span class="status-dot" id="statusDot"></span>
-<span id="connectionStatus">未连接</span>
-</div>
-<div class="data-info" id="dataInfo">
-<span>等待数据...</span>
-<span id="saveStatus" style="margin-left:10px;color:#fbbf24;display:none;"></span>
-</div>
+<!-- 第一行：设备控制 -->
+<div class="row">
+  <div class="group">
+    <label>设备:</label>
+    <select id="device-list" class="tech" style="min-width:220px; max-width:320px;"><option value="">— 未扫描 —</option></select>
+    <button id="scan-btn" class="tech">扫描设备</button>
+    <button id="connect-btn" class="tech">连接设备</button>
+    <button id="disconnect-btn" class="tech" disabled>断开</button>
+  </div>
 </div>
 
-<div class="control-panel">
-<button id="scanBtn">扫描 CONIX 设备</button>
-<button id="scanAllBtn">扫描所有设备</button>
-<button id="connectBtn" disabled>连接设备</button>
-<button id="disconnectBtn" disabled>断开连接</button>
-<button id="startBtn" class="success" disabled>开始采集</button>
-<button id="stopBtn" class="danger" disabled>停止采集</button>
-<button id="exportBtn">导出日志</button>
-<button id="clearBtn">新建会话</button>
+<!-- 第二行：采集参数 -->
+<div class="row">
+  <div class="group">
+    <label>数据类型:</label>
+    <label><input type="checkbox" id="eeg-cb" checked> EEG</label>
+    <label><input type="checkbox" id="ppg-cb" checked> PPG</label>
+    <label><input type="checkbox" id="imu-cb" checked> IMU</label>
+  </div>
+  <div class="group">
+    <label>采样率(Hz):</label>
+    <label>EEG</label><select id="eeg-fs" class="tech"></select>
+    <label>PPG</label><select id="ppg-fs" class="tech"></select>
+    <label>IMU</label><select id="imu-fs" class="tech"></select>
+    <label>EEG增益</label><select id="eeg-gain" class="tech"></select>
+  </div>
+  <div class="group">
+    <label>时长(分钟,0=持续):</label>
+    <input type="number" id="duration" class="tech" value="0" min="0" max="65535">
+  </div>
+  <button id="start-btn" class="tech" disabled>开始采集</button>
+  <button id="stop-btn" class="tech" disabled>停止采集</button>
+  <button id="export-btn" class="tech" disabled>导出CSV</button>
+  <button id="export-raw-btn" class="tech" disabled>导出Raw</button>
 </div>
 
-<div class="filter-panel">
-<div class="filter-group">
-<h3>EEG 滤波</h3>
-<div class="filter-controls">
-<button class="filter-btn" id="eegHpBtn">0.5Hz 高通</button>
-<button class="filter-btn" id="eegLpBtn">低通</button>
-<input type="number" id="eegLpFreq" value="30" min="1" max="100">
-<button class="filter-btn" id="eegNotchBtn">50Hz 陷波</button>
-<button class="filter-btn" id="eegNotch60Btn">60Hz 陷波</button>
-</div>
-</div>
-<div class="filter-group">
-<h3>运动传感器滤波</h3>
-<div class="filter-controls">
-<button class="filter-btn" id="accHpBtn">加速度高通</button>
-<button class="filter-btn" id="gyroHpBtn">陀螺仪高通</button>
-<button class="filter-btn" id="ppgHpBtn">PPG 高通</button>
-<button class="filter-btn" id="hrHpBtn">HR 高通</button>
-</div>
-</div>
-</div>
-
-<textarea class="log-box" id="logBox" readonly placeholder="运行日志..."></textarea>
-
-<div class="range-bar">
-<div class="range-group"><span class="range-label">EEG 量程</span><div class="range-row" id="eegRangeRow"></div></div>
-<div class="range-group"><span class="range-label">PPG/HR 量程</span><div class="range-row" id="physioRangeRow"></div></div>
-<div class="range-group"><button class="range-btn" id="gridToggleBtn">网格: 开</button></div>
+<!-- 第三行：滤波控制 -->
+<div class="row">
+  <div class="group">
+    <label>EEG 滤波:</label>
+    <label><input type="checkbox" id="eeg-hp"> 0.5Hz 高通</label>
+    <label><input type="checkbox" id="eeg-lp"> 低通</label>
+    <input type="number" id="eeg-lp-freq" class="tech" value="30" min="1" max="120" style="width:48px;">Hz
+    <label><input type="checkbox" id="eeg-notch"> 陷波</label>
+    <label><input type="radio" name="notch-freq" value="50" checked>50Hz</label>
+    <label><input type="radio" name="notch-freq" value="60">60Hz</label>
+  </div>
+  <div class="group">
+    <label>PPG 滤波:</label>
+    <label><input type="checkbox" id="ppg-bp"> 带通 0.5-10Hz</label>
+  </div>
+  <div class="group">
+    <label>IMU 滤波:</label>
+    <label><input type="checkbox" id="acc-lp"> 加速度低通 5Hz</label>
+    <label><input type="checkbox" id="gyro-lp"> 陀螺低通 5Hz</label>
+  </div>
 </div>
 
-<div class="chart-grid">
-<div class="chart-container">
-<canvas id="eeg1Chart"></canvas>
-</div>
-<div class="chart-container">
-<canvas id="eeg2Chart"></canvas>
-</div>
-<div class="chart-container">
-<canvas id="ppgChart"></canvas>
-</div>
-<div class="chart-container">
-<canvas id="hrChart"></canvas>
-</div>
-<div class="chart-container">
-<canvas id="accChart"></canvas>
-</div>
-<div class="chart-container">
-<canvas id="gyroChart"></canvas>
-</div>
+<!-- 回放控制 -->
+<div class="row" id="playback-bar">
+  <div class="group">
+    <label>文件回放:</label>
+    <input type="file" id="file-input" accept=".txt" style="display:none;">
+    <button id="load-file-btn" class="tech">加载TXT文件</button>
+    <button id="play-btn" class="tech" disabled>播放</button>
+    <button id="pause-btn" class="tech" disabled>暂停</button>
+    <button id="stop-btn2" class="tech" disabled>停止</button>
+    <label>速度:</label>
+    <select id="play-speed" class="tech">
+      <option value="0.5">0.5x</option>
+      <option value="1" selected>1x</option>
+      <option value="2">2x</option>
+      <option value="5">5x</option>
+      <option value="10">10x</option>
+    </select>
+    <label>进度:</label>
+    <input type="range" id="play-progress" min="0" max="1000" value="0" style="width:200px;">
+    <span id="play-time" style="min-width:120px;">00:00 / 00:00</span>
+  </div>
 </div>
 
-<footer><p>基于 Web Bluetooth | 兼容 Chrome/Edge | 数据实时处理</p></footer>
+<!-- 波形区 -->
+<div class="canvas-box">
+  <div class="ctrl-bar">
+    <span class="lbl">EEG 量程(μV):</span>
+    <span id="eeg-amp"></span>
+    <span class="lbl">模式:</span>
+    <button class="tech mode-btn active" data-target="eeg" data-mode="stacked">堆叠</button>
+    <button class="tech mode-btn" data-target="eeg" data-mode="superimposed">叠加</button>
+    <button class="tech mode-btn" data-target="eeg" data-mode="centered">居中</button>
+    <span class="lbl">间距:</span><span id="eeg-spacing" style="display:inline-block;width:54px;text-align:center;"></span>
+    <button class="tech" id="eeg-sp-inc">＋</button>
+    <button class="tech" id="eeg-sp-dec">－</button>
+    <span class="spacer"></span>
+    <span class="hint">扫描线为橙色虚线，跟随写入位置</span>
+  </div>
+  <canvas id="eeg-canvas" style="height:300px;"></canvas>
+</div>
+
+<div class="canvas-box">
+  <div class="ctrl-bar">
+    <span class="lbl">PPG 量程:</span>
+    <span id="ppg-amp"></span>
+    <span class="lbl">模式:</span>
+    <button class="tech mode-btn active" data-target="ppg" data-mode="stacked">堆叠</button>
+    <button class="tech mode-btn" data-target="ppg" data-mode="superimposed">叠加</button>
+    <button class="tech mode-btn" data-target="ppg" data-mode="centered">居中</button>
+    <span class="lbl">间距:</span><span id="ppg-spacing" style="display:inline-block;width:54px;text-align:center;"></span>
+    <button class="tech" id="ppg-sp-inc">＋</button>
+    <button class="tech" id="ppg-sp-dec">－</button>
+  </div>
+  <canvas id="ppg-canvas" style="height:220px;"></canvas>
+</div>
+
+<div id="imu-row">
+  <div class="canvas-box">
+    <div class="ctrl-bar">
+      <span class="lbl">ACC 量程(g):</span><span id="acc-amp"></span>
+    </div>
+    <canvas id="acc-canvas" style="height:240px;"></canvas>
+  </div>
+  <div class="canvas-box">
+    <div class="ctrl-bar">
+      <span class="lbl">GYRO 量程(dps):</span><span id="gyro-amp"></span>
+    </div>
+    <canvas id="gyro-canvas" style="height:240px;"></canvas>
+  </div>
+</div>
+
+<div id="log"></div>
+
+<div style="height:40px;"></div><!-- 状态栏占位 -->
+
+<div id="status-bar">
+  <span id="conn-dot" style="color:var(--warn);">●</span>
+  <span id="conn-state" style="color:var(--warn); font-weight:bold;">未连接</span>
+  <span id="status-text">就绪</span>
+  <span class="spacer"></span>
+  <span id="stats-text"></span>
 </div>
 
 <script>
-// ==================== 全局常量 ====================
-const EEG_FS = 250, OTHER_FS = 100, SHOW_SECONDS = 10;
-const EEG_POINTS = EEG_FS * SHOW_SECONDS;
-const OTHER_POINTS = OTHER_FS * SHOW_SECONDS;
-const VREF = 4.5, GAIN = 6;
-const LSB = (2 * VREF / GAIN) / (2 ** 24);
-// 命令定义 - 根据设备类型选择
-const COMMANDS = {
-  SLEEP_BAND: {  // 蓝牙名称包含 CONIX_SLEEP_BAND
-    START_COLLECT: new Uint8Array([0xAA,0xAA,0x03,0x11,0x00,0x00,0x00]),
-    STOP_COLLECT: new Uint8Array([0xAA,0xAA,0x03,0x12,0x00,0x00,0x00]),
-  },
-  SLEEP_EASY: {  // 蓝牙名称包含 CONIX_SLEEP_EASY
-    START_COLLECT: new Uint8Array([0xAA,0xAA,0x01,0x03,0x00,0x00,0x00]),
-    STOP_COLLECT: new Uint8Array([0xAA,0xAA,0x01,0x04,0x00,0x00,0x00]),
-  }
+"use strict";
+/* ============================================================
+ * 一、常量配置
+ * ============================================================ */
+const SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb";
+const WRITE_UUID   = "0000fff2-0000-1000-8000-00805f9b34fb";
+const NOTIFY_UUID  = "0000fff1-0000-1000-8000-00805f9b34fb";
+const DEVICE_NAME_FILTER = "CONIX_SLEEP";
+
+const DEVICE_CODE = 0x06;
+const CMD_START_COLLECT = 0x10;
+const CMD_STOP_COLLECT  = 0x11;
+const CMD_SET_PARAMS    = 0x12;
+const CMD_STATUS_GET    = 0x01;
+
+// 帧类型
+const FT_CMD = 0xAA, FT_EEG = 0xC0, FT_PPG = 0xD0, FT_IMU = 0xE0;
+const FRAME_HEADS = [[0xAA,0xAA],[0xC0,0xC0],[0xD0,0xD0],[0xE0,0xE0]];
+
+// 采样率档位（code -> Hz）
+const EEG_FS_MAP = {0:250, 1:500, 2:1000};
+const PPG_FS_MAP = {0:50, 1:100, 2:200, 3:400, 4:800, 5:1000, 6:1600, 7:3200};
+const IMU_FS_MAP = {0:12.5, 1:26, 2:52, 3:104, 4:208, 5:416, 6:833, 7:1660, 8:3330};
+const EEG_FS_CODE = inv(EEG_FS_MAP), PPG_FS_CODE = inv(PPG_FS_MAP), IMU_FS_CODE = inv(IMU_FS_MAP);
+const EEG_GAIN_MAP = {0:1, 1:2, 2:4, 3:6, 4:8, 5:12, 6:24};
+const EEG_GAIN_CODE = inv(EEG_GAIN_MAP);
+
+function inv(m){ const o={}; for(const k in m) o[m[k]]=parseInt(k); return o; }
+
+// EEG 物理换算（增益默认 12）
+const EEG_VREF = 4.5;
+const EEG_GAIN_DEFAULT = 12;
+let   EEG_LSB = (2*EEG_VREF/EEG_GAIN_DEFAULT)/Math.pow(2,24); // V/LSB
+
+// IMU 物理量
+const ACC_SCALE = 16384.0;   // LSB/g (±2g)
+const GYRO_SCALE = 16.4;     // LSB/dps (±2000dps)
+
+// 显示参数
+const SHOW_SECONDS = 10;
+const EEG_FS_DEFAULT = 250, PPG_FS_DEFAULT = 100, IMU_FS_DEFAULT = 104;
+const EEG_FS_OPTIONS = [250, 500, 1000];
+const PPG_FS_OPTIONS = [50, 100, 200, 400, 800, 1000];
+const IMU_FS_OPTIONS = [12.5, 26, 52, 104, 208, 416];
+const AMP_OPTIONS_EEG  = [10, 50, 100, 200, 500, 1000, 2000, 10000];
+const AMP_OPTIONS_PPG  = [5, 10, 20, 50, 100, 200];
+const AMP_OPTIONS_ACC  = [0.5, 1, 2, 3];
+const AMP_OPTIONS_GYRO = [10, 50, 100, 200, 300];
+
+// 颜色
+const C = {
+  bg:"#0a0e1a", grid:"#1a3a5c", text:"#00ffcc", accent:"#ffaa00", warn:"#ff3344",
+  eeg:["#00ffff","#ff00ff"], ppg:["#00ff88","#ffff00"],
+  acc:["#ff5555","#55ff55","#5599ff"],
+  gyro:["#ffaa00","#ffff00","#aa00ff"]
 };
 
-/** 根据设备名称判断设备类型 */
-function getDeviceType(deviceName) {
-  if (!deviceName) return 'SLEEP_BAND';
-  if (deviceName.includes('CONIX_SLEEP_EASY')) return 'SLEEP_EASY';
-  if (deviceName.includes('CONIX_SLEEP_BAND')) return 'SLEEP_BAND';
-  return 'SLEEP_BAND';
-}
-
-/** 根据设备名称获取对应的命令 */
-function getCommand(deviceName, commandType) {
-  const deviceType = getDeviceType(deviceName);
-  return COMMANDS[deviceType][commandType] || COMMANDS.SLEEP_BAND[commandType];
-}
-
-/** 创建时钟同步命令 */
-function createSyncTimeCmd() {
-  const timestamp = Math.floor(Date.now() / 1000);
-  const cmd = new Uint8Array(15);
-  cmd[0] = 0xAA; cmd[1] = 0xAA; cmd[2] = 0x01; cmd[3] = 0x06; cmd[4] = 0x08;
-  cmd[5] = timestamp & 0xFF;
-  cmd[6] = (timestamp >> 8) & 0xFF;
-  cmd[7] = (timestamp >> 16) & 0xFF;
-  cmd[8] = (timestamp >> 24) & 0xFF;
-  for (let i = 9; i < 15; i++) cmd[i] = 0x00;
-  return cmd;
-}
-const RANGE_VALUES = [10,50,100,200,500,1000,2000,10000];
-const CANDIDATE_SVCS = [
-  "000000ff-0000-1000-8000-00805f9b34fb",
-  "0000ff00-0000-1000-8000-00805f9b34fb",
-  "6e400001-b5b3-f393-e0a9-e50e24dcca9e"
-];
-const CANDIDATE_CHARS = [
-  "0000ff01-0000-1000-8000-00805f9b34fb",
-  "0000ee01-0000-1000-8000-00805f9b34fb",
-  "6e400003-b5b3-f393-e0a9-e50e24dcca9e",
-  "6e400002-b5b3-f393-e0a9-e50e24dcca9e"
-];
-
-// ==================== 工具函数 ====================
-function toSigned16(v) { return v > 32767 ? v - 65536 : v; }
-function toSigned24(v) { return v > 8388607 ? v - 16777216 : v; }
-
-function bytesToHex(arr) {
-  return Array.from(arr).map(x => x.toString(16).padStart(2,'0')).join('');
-}
-
-function uniqueStrings(arr) {
-  const seen = new Set();
-  return arr.filter(s => { const k = (s||'').trim().toLowerCase(); if(!k||seen.has(k)) return false; seen.add(k); return true; });
-}
-
-function hasProp(ch, props) { return props.some(p => ch.properties.includes(p)); }
-
-// ==================== 本地时间戳 ====================
-function localTimestamp() {
-  const d = new Date();
-  const pad = (n, w=2) => String(n).padStart(w, '0');
-  const y = d.getFullYear();
-  const mo = pad(d.getMonth() + 1);
-  const dd = pad(d.getDate());
-  const h = pad(d.getHours());
-  const mi = pad(d.getMinutes());
-  const s = pad(d.getSeconds());
-  const ms = pad(d.getMilliseconds(), 3);
-  const offset = -d.getTimezoneOffset();
-  const sign = offset >= 0 ? '+' : '-';
-  const oh = pad(Math.floor(Math.abs(offset) / 60));
-  const om = pad(Math.abs(offset) % 60);
-  return `${y}-${mo}-${dd}T${h}:${mi}:${s}.${ms}${sign}${oh}:${om}`;
-}
-
-// ==================== 前置检查 ====================
-function preCheck() {
-  const el = document.getElementById('preCheckTip');
-  const tips = [];
-  let canBLE = true;
-
-  if (!navigator.bluetooth) {
-    tips.push('浏览器不支持 Web Bluetooth，请使用 Chrome/Edge');
-    canBLE = false;
-  }
-  if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-    tips.push('非 HTTPS 环境，需通过 HTTPS 或 localhost 访问');
-  }
-  if (/iPhone|iPad/i.test(navigator.userAgent)) {
-    tips.push('iOS 设备：可安装第三方 App「Bluefy」或「WebBLE」来运行 Web Bluetooth 页面');
-  } else if (/Android/i.test(navigator.userAgent)) {
-    tips.push('Android 设备：请确保已给浏览器开启位置信息和蓝牙权限');
-  }
-
-  if (tips.length === 0) {
-    el.innerHTML = '环境检测通过，可以扫描设备';
-    el.style.background = 'rgba(46,213,115,0.2)';
-    el.style.borderLeftColor = '#2ed573';
-  } else {
-    el.innerHTML = tips.join('<br>');
-    if (!canBLE) {
-      document.querySelectorAll('.control-panel button').forEach(b => b.disabled = true);
+/* ============================================================
+ * 二、CRC16-CCITT-FALSE + 指令拼装
+ * ============================================================ */
+function crc16_ccitt_false(buf){
+  let crc = 0xFFFF;
+  for(const b of buf){
+    crc ^= (b << 8);
+    for(let i=0;i<8;i++){
+      if(crc & 0x8000) crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
+      else crc = (crc << 1) & 0xFFFF;
     }
   }
+  return crc;
 }
-
-// ==================== 页面 URL 二维码指引 ====================
-function showPageUrl() {
-  const qr = document.getElementById('qrArea');
-  const url = window.location.href;
-  // if (url && !url.startsWith('file://')) {
-  //   qr.innerHTML = `手机扫码打开此页面：<a href="${url}" target="_blank">${url}</a>`;
-  // } else {
-  //   qr.textContent = '提示：通过 localhost 或 HTTPS 打开后可在此看到分享链接';
-  // }
-  qr.textContent = '提示：通过 localhost 或 HTTPS 打开后可在此看到分享链接';
+function appendCRC(arr){
+  const crc = crc16_ccitt_false(arr);
+  return arr.concat([(crc>>8)&0xFF, crc&0xFF]);
 }
-
-// ==================== RingBuffer ====================
-class RingBuffer {
-  constructor(size) { this.data = new Float64Array(size); this.size = size; this.idx = 0; this.full = false; }
-  push(v) {
-    this.data[this.idx] = v;
-    this.idx = (this.idx + 1) % this.size;
-    if (this.idx === 0) this.full = true;
-  }
-  pushBatch(arr) { for (const v of arr) this.push(v); }
-  toArray() {
-    if (!this.full) return Array.from(this.data.slice(0, this.idx));
-    return Array.from(this.data.slice(this.idx)).concat(Array.from(this.data.slice(0, this.idx)));
-  }
+function buildFrame(cmdCode, data, seq){
+  seq = seq || 0;
+  const d = data || [];
+  const f = [0xAA,0xAA, (seq>>8)&0xFF, seq&0xFF, DEVICE_CODE, cmdCode, d.length & 0xFF].concat(d);
+  return appendCRC(f);
 }
-
-// ==================== 二阶 IIR 滤波器 ====================
-class DigitalFilter {
-  constructor(b, a) {
-    this.b = b.slice(); this.a = a.slice();
-    this.xs = new Array(b.length).fill(0);
-    this.ys = new Array(a.length - 1).fill(0);
-  }
-  process(x) {
-    if (!Number.isFinite(x)) return x;
-    this.xs.unshift(x); this.xs.pop();
-    let y = 0;
-    for (let i = 0; i < this.b.length; i++) y += this.b[i] * this.xs[i];
-    for (let i = 1; i < this.a.length; i++) y -= this.a[i] * this.ys[i - 1];
-    y /= this.a[0];
-    this.ys.unshift(y); this.ys.pop();
-    return y;
-  }
-}
-
-function biquadLP(fs, fc, q) {
-  q = q || Math.SQRT1_2;
-  const w0 = 2 * Math.PI * fc / fs, cosw = Math.cos(w0), sinw = Math.sin(w0), a = sinw / (2 * q);
-  const a0 = 1 + a, a1 = -2 * cosw, a2 = 1 - a;
-  const b0 = (1 - cosw) / 2, b1 = 1 - cosw, b2 = (1 - cosw) / 2;
-  return { b: [b0/a0, b1/a0, b2/a0], a: [1, a1/a0, a2/a0] };
-}
-function biquadHP(fs, fc, q) {
-  q = q || Math.SQRT1_2;
-  const w0 = 2 * Math.PI * fc / fs, cosw = Math.cos(w0), sinw = Math.sin(w0), a = sinw / (2 * q);
-  const a0 = 1 + a, a1 = -2 * cosw, a2 = 1 - a;
-  const b0 = (1 + cosw) / 2, b1 = -(1 + cosw), b2 = (1 + cosw) / 2;
-  return { b: [b0/a0, b1/a0, b2/a0], a: [1, a1/a0, a2/a0] };
-}
-function biquadNotch(fs, freq, q) {
-  q = q || 30;
-  const w0 = 2 * Math.PI * freq / fs, cosw = Math.cos(w0), sinw = Math.sin(w0), a = sinw / (2 * q);
-  const a0 = 1 + a, a1 = -2 * cosw, a2 = 1 - a;
-  return { b: [1/a0, a1/a0, 1/a0], a: [1, a1/a0, a2/a0] };
-}
-
-// ==================== 数据解析 ====================
-function parseEegSinglePacket(d) {
-  const e1 = toSigned24((d[0]<<16)|(d[1]<<8)|d[2]) * LSB * 1e6;
-  const e2 = toSigned24((d[3]<<16)|(d[4]<<8)|d[5]) * LSB * 1e6;
-  return [e1, e2];
-}
-function parseEegBuffer(buf) {
-  const LEN = 209, results = [];
-  let cnt = 0;
-  for (let i = 0; i + LEN <= buf.length; i += LEN) {
-    if (buf[i] !== 0xC0) continue;
-    for (let j = 0; j < 34; j++) results.push(parseEegSinglePacket(buf.slice(i+5+j*6, i+5+j*6+6)));
-    cnt++;
-  }
-  if (cnt) buf.splice(0, cnt * LEN);
-  return results;
-}
-function parseImuSingle(d) {
-  return [
-    toSigned16((d[1]<<8)|d[0]) / 16384 * 9.8,
-    toSigned16((d[3]<<8)|d[2]) / 16384 * 9.8,
-    toSigned16((d[5]<<8)|d[4]) / 16384 * 9.8,
-    toSigned16((d[7]<<8)|d[6]) / 512,
-    toSigned16((d[9]<<8)|d[8]) / 512,
-    toSigned16((d[11]<<8)|d[10]) / 512,
-    toSigned24((d[12]<<16)|(d[13]<<8)|d[14]),
-    toSigned24((d[15]<<16)|(d[16]<<8)|d[17])
+function buildConfigCmd(eegOn, eegFsHz, ppgOn, ppgFsHz, imuOn, imuFsHz, eegGain, durationMin, eegLeadoff){
+  const eegFsCode = EEG_FS_CODE[eegFsHz] !== undefined ? EEG_FS_CODE[eegFsHz] : 0;
+  const ppgFsCode = PPG_FS_CODE[ppgFsHz] !== undefined ? PPG_FS_CODE[ppgFsHz] : 0;
+  const imuFsCode = IMU_FS_CODE[imuFsHz] !== undefined ? IMU_FS_CODE[imuFsHz] : 0;
+  let gainCode = 0;
+  for(const k in EEG_GAIN_MAP){ if(EEG_GAIN_MAP[k] === eegGain){ gainCode = parseInt(k); break; } }
+  const dur = Math.max(0, Math.min(durationMin||0, 65535));
+  const data = [
+    eegOn?1:0, eegFsCode, eegLeadoff?1:0, gainCode,
+    ppgOn?1:0, ppgFsCode,
+    imuOn?1:0, imuFsCode,
+    (dur>>8)&0xFF, dur&0xFF
   ];
+  return buildFrame(CMD_SET_PARAMS, data);
 }
-function parse185Buffer(buf) {
-  const LEN = 185, results = [];
-  let cnt = 0;
-  for (let i = 0; i + LEN <= buf.length; i += LEN) {
-    if (buf[i] !== 0xD0) continue;
-    for (let j = 0; j < 10; j++) results.push(parseImuSingle(buf.slice(i+5+j*18, i+5+j*18+18)));
-    cnt++;
+function buildStartCmd(){ return buildFrame(CMD_START_COLLECT); }
+function buildStopCmd(){ return buildFrame(CMD_STOP_COLLECT); }
+function buildStatusCmd(){ return buildFrame(CMD_STATUS_GET); }
+
+/* ============================================================
+ * 三、流式帧解析器（状态机扫描帧头，抗粘包/丢包/CRC错误）
+ * ============================================================ */
+const FrameParser = (function(){
+  const CRC_LEN = 2;
+  // 指令帧偏移
+  const CMD_OFF_SEQ=2, CMD_OFF_DEV=4, CMD_OFF_CODE=5, CMD_OFF_LEN=6, CMD_OFF_DATA=7, CMD_HEADER_LEN=7;
+  // 数据帧偏移（PPG/IMU 通用）
+  const DATA_OFF_PKT=2, DATA_OFF_TS=6, DATA_OFF_LEN=10, DATA_OFF_DATA=12, DATA_HEADER_LEN=12;
+  // EEG 帧多 1 字节导联脱落状态
+  const EEG_OFF_LEADOFF=12, EEG_OFF_DATA=13, EEG_HEADER_LEN=13;
+
+  function cls(){
+    this._buf = [];        // number[]
+    this.crcErrors = 0;
   }
-  if (cnt) buf.splice(0, cnt * LEN);
-  return results;
-}
-
-// ==================== 状态 ====================
-const S = {
-  device: null, server: null, notifyCh: null, writeCh: null,
-  deviceName: null,  // 保存设备名称用于命令选择
-  connected: false, collecting: false,
-  imuBuf: [], eegBuf: [], rawLogs: [],
-  imuPkt: 0, eegPkt: 0,
-  eegHp: false, eegLp: false, eegLpF: 30, eegNotch: false, notchFreq: 50,
-  accHp: false, gyroHp: false, ppgHp: false, hrHp: false,
-};
-
-const filters = {};
-const bufs = {
-  accX: new RingBuffer(OTHER_POINTS), accY: new RingBuffer(OTHER_POINTS), accZ: new RingBuffer(OTHER_POINTS),
-  gyroX: new RingBuffer(OTHER_POINTS), gyroY: new RingBuffer(OTHER_POINTS), gyroZ: new RingBuffer(OTHER_POINTS),
-  ppg: new RingBuffer(OTHER_POINTS), hr: new RingBuffer(OTHER_POINTS),
-  eeg1: new RingBuffer(EEG_POINTS), eeg2: new RingBuffer(EEG_POINTS)
-};
-
-function buildTime(n, fs) {
-  const a = new Array(n);
-  for (let i = 0; i < n; i++) a[i] = -SHOW_SECONDS + i / fs;
-  return a;
-}
-const tOther = buildTime(OTHER_POINTS, OTHER_FS);
-const tEeg = buildTime(EEG_POINTS, EEG_FS);
-
-// ==================== IndexedDB 自动保存 ====================
-const DB_NAME = 'SleepBandDB', DB_VER = 1, STORE = 'logs';
-let db = null;
-let autoSaveTimer = null;
-const SAVE_INTERVAL = 3000;
-let savedChunks = 0;
-
-function openDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VER);
-    req.onupgradeneeded = () => {
-      const s = req.result.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
-      s.createIndex('ts', 'ts', { unique: false });
-    };
-    req.onsuccess = () => { db = req.result; resolve(); };
-    req.onerror = () => reject(req.error);
-  });
-}
-
-/** 将 rawLog 全部写入 IndexedDB 后清空 rawLog（已保存数据不再保留） */
-async function flushLogs() {
-  if (!db || !rawLog.length) return;
-  const entries = rawLog.slice();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    const store = tx.objectStore(STORE);
-    const chunk = { ts: localTimestamp(), lines: entries };
-    store.add(chunk);
-    tx.oncomplete = () => { savedChunks++; rawLog = []; updateSaveStatus(); resolve(); };
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-function startAutoSave() {
-  stopAutoSave();
-  autoSaveTimer = setInterval(async () => {
-    if (!rawLog.length) return;
-    try { await flushLogs(); }
-    catch(e) { log(`自动保存失败: ${e.message}`); }
-  }, SAVE_INTERVAL);
-}
-
-function stopAutoSave() {
-  if (autoSaveTimer) { clearInterval(autoSaveTimer); autoSaveTimer = null; }
-}
-
-async function flushThenStop() {
-  stopAutoSave();
-  if (rawLog.length && db) await flushLogs();
-}
-
-function updateSaveStatus() {
-  const el = document.getElementById('saveStatus');
-  if (savedChunks > 0) {
-    el.style.display = 'inline';
-    el.textContent = `已保存 ${savedChunks} 批`;
-  } else {
-    el.style.display = 'none';
-  }
-}
-
-/** 从 IndexedDB 读取所有已保存的数据 */
-async function loadAllSaved() {
-  if (!db) return [];
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readonly');
-    const store = tx.objectStore(STORE);
-    const req = store.getAll();
-    req.onsuccess = () => resolve(req.result || []);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-/** 删除 IndexedDB 中所有保存的数据 */
-async function clearDB() {
-  if (!db) return;
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    const store = tx.objectStore(STORE);
-    store.clear();
-    tx.oncomplete = () => { savedChunks = 0; updateSaveStatus(); resolve(); };
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-/** 导出：先 flush 到 DB，再读全量数据后清空 DB，保证导出无重复且只导出一次 */
-async function doExport() {
-  try {
-    stopAutoSave();
-    if (rawLog.length && db) await flushLogs();
-    const chunks = await loadAllSaved();
-    const lines = chunks.flatMap(c => c.lines || []);
-    if (!lines.length) { log('无数据可导出'); if (S.collecting) startAutoSave(); return; }
-    await clearDB();
-    const content = lines.join('\n');
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `sleep_band_${localTimestamp().replace(/[:.]/g,'-')}.txt`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
-    log(`导出 ${lines.length} 条记录，缓存已清空`);
-    if (S.collecting) startAutoSave();
-  } catch(e) { log(`导出失败: ${e.message}`); if (S.collecting) startAutoSave(); }
-}
-
-// ==================== 图表 ====================
-function makeChart(id, labels, datasets, unit, title) {
-  return new Chart(document.getElementById(id), {
-    type: 'line',
-    data: { labels, datasets },
-    options: {
-      animation: false, responsive: true, maintainAspectRatio: false,
-      normalized: true,
-      interaction: { mode: 'nearest', intersect: false },
-      plugins: { legend: { display: datasets.length > 1, labels: { color: '#aaa', boxWidth: 10 } } },
-      elements: { point: { radius: 0 }, line: { borderWidth: 1.5, tension: 0 } },
-      scales: {
-        x: { type: 'linear', min: -SHOW_SECONDS, max: 0,
-          ticks: { stepSize: 0.1, autoSkip: false, maxTicksLimit: 200,
-            callback: function(v) { return Number.isInteger(v) ? v + 's' : ''; },
-            color: function(ctx) { return ctx.tick && Number.isInteger(ctx.tick.value) ? '#bbb' : 'transparent'; },
-            font: function(ctx) { if (ctx.tick && Number.isInteger(ctx.tick.value)) return { weight: 'bold', size: 10 }; return {}; }
-          },
-          grid: { color: function(ctx) {
-            if (ctx.tick && Number.isInteger(ctx.tick.value)) return 'rgba(255,255,255,0.2)';
-            return 'rgba(255,255,255,0.05)';
-          }, lineWidth: function(ctx) {
-            return ctx.tick && Number.isInteger(ctx.tick.value) ? 1.5 : 0.5;
-          }, drawBorder: false
-          }
-        },
-        y: { title: { display: true, text: title, color: '#72efdd', font: { size: 11 } }, ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.08)' } }
+  cls.prototype.feed = function(data){
+    for(let i=0;i<data.length;i++) this._buf.push(data[i]);
+    const frames = [];
+    let guard = 0;
+    while(guard++ < 100000){
+      const r = this._tryPopOne();
+      if(r === null) break;
+      frames.push(r);
+    }
+    return frames;
+  };
+  function findEarliestHead(buf){
+    let bestIdx = -1, bestType = -1;
+    for(const h of FRAME_HEADS){
+      for(let i=0;i+1<buf.length;i++){
+        if(buf[i]===h[0] && buf[i+1]===h[1]){
+          if(bestIdx<0 || i<bestIdx){ bestIdx=i; bestType=h[0]; }
+          break; // 该帧头最早出现位置
+        }
       }
     }
-  });
-}
-
-const charts = {
-  eeg1: makeChart('eeg1Chart', tEeg, [{label:'Ch1',data:[],borderColor:'#f59e0b'}], 'uV', 'EEG 1'),
-  eeg2: makeChart('eeg2Chart', tEeg, [{label:'Ch2',data:[],borderColor:'#06b6d4'}], 'uV', 'EEG 2'),
-  ppg: makeChart('ppgChart', tOther, [{label:'PPG',data:[],borderColor:'#0ea5e9'}], '', 'PPG'),
-  hr: makeChart('hrChart', tOther, [{label:'HR',data:[],borderColor:'#ec4899'}], '', 'HR'),
-  acc: makeChart('accChart', tOther, [
-    {label:'X',data:[],borderColor:'#ef4444'},{label:'Y',data:[],borderColor:'#22c55e'},{label:'Z',data:[],borderColor:'#3b82f6'}
-  ], '', 'ACC'),
-  gyro: makeChart('gyroChart', tOther, [
-    {label:'X',data:[],borderColor:'#f59e0b'},{label:'Y',data:[],borderColor:'#14b8a6'},{label:'Z',data:[],borderColor:'#a855f7'}
-  ], '', 'GYRO')
-};
-
-function setEegRange(y) {
-  charts.eeg1.options.scales.y.min = -y; charts.eeg1.options.scales.y.max = y;
-  charts.eeg2.options.scales.y.min = -y; charts.eeg2.options.scales.y.max = y;
-  charts.eeg1.update('none'); charts.eeg2.update('none');
-}
-function setPhysioRange(y) {
-  charts.ppg.options.scales.y.min = -y; charts.ppg.options.scales.y.max = y;
-  charts.hr.options.scales.y.min = -y; charts.hr.options.scales.y.max = y;
-  charts.ppg.update('none'); charts.hr.update('none');
-}
-function makeMergedRangeBtns(containerId, setFn) {
-  const root = document.getElementById(containerId);
-  RANGE_VALUES.forEach(v => {
-    const b = document.createElement('button');
-    b.className = 'range-btn'; b.textContent = v;
-    b.onclick = () => setFn(v);
-    root.appendChild(b);
-  });
-}
-makeMergedRangeBtns('eegRangeRow', setEegRange);
-makeMergedRangeBtns('physioRangeRow', setPhysioRange);
-
-let gridVisible = true;
-function toggleGrid() {
-  gridVisible = !gridVisible;
-  const btn = document.getElementById('gridToggleBtn');
-  btn.textContent = gridVisible ? '网格: 开' : '网格: 关';
-  btn.classList.toggle('active', !gridVisible);
-  Object.values(charts).forEach(ch => {
-    ch.options.scales.x.grid.display = gridVisible;
-    ch.options.scales.y.grid.display = gridVisible;
-    ch.update('none');
-  });
-}
-document.getElementById('gridToggleBtn').onclick = toggleGrid;
-
-function toPoints(arr, len) {
-  const n = arr.length;
-  if (n === 0) return tOther.slice(0, len).map(x => ({x, y: 0}));
-  const a = new Array(len);
-  const start = len - n;
-  for (let i = 0; i < len; i++) {
-    a[i] = { x: (i < start ? tOther[0] - (start - i) / OTHER_FS : tOther[i - start]), y: i < start ? 0 : arr[i - start] };
+    return [bestIdx, bestType];
   }
-  return a;
-}
-function toPointsEeg(arr, len) {
-  const n = arr.length;
-  if (n === 0) return tEeg.slice(0, len).map(x => ({x, y: 0}));
-  const a = new Array(len);
-  const start = len - n;
-  for (let i = 0; i < len; i++) {
-    a[i] = { x: (i < start ? tEeg[0] - (start - i) / EEG_FS : tEeg[i - start]), y: i < start ? 0 : arr[i - start] };
-  }
-  return a;
-}
+  function u16be(b,o){ return ((b[o]<<8)|b[o+1])>>>0; }
+  function u32be(b,o){ return ((b[o]<<24)|(b[o+1]<<16)|(b[o+2]<<8)|b[o+3])>>>0; }
 
-let redrawPending = false;
-function scheduleRedraw() {
-  if (redrawPending) return;
-  redrawPending = true;
-  requestAnimationFrame(() => { redrawPending = false; redrawAll(); });
-}
-function redrawAll() {
-  const o = OTHER_POINTS, e = EEG_POINTS;
-  charts.acc.data.datasets[0].data = toPoints(bufs.accX.toArray(), o);
-  charts.acc.data.datasets[1].data = toPoints(bufs.accY.toArray(), o);
-  charts.acc.data.datasets[2].data = toPoints(bufs.accZ.toArray(), o);
-  charts.gyro.data.datasets[0].data = toPoints(bufs.gyroX.toArray(), o);
-  charts.gyro.data.datasets[1].data = toPoints(bufs.gyroY.toArray(), o);
-  charts.gyro.data.datasets[2].data = toPoints(bufs.gyroZ.toArray(), o);
-  charts.ppg.data.datasets[0].data = toPoints(bufs.ppg.toArray(), o);
-  charts.hr.data.datasets[0].data = toPoints(bufs.hr.toArray(), o);
-  charts.eeg1.data.datasets[0].data = toPointsEeg(bufs.eeg1.toArray(), e);
-  charts.eeg2.data.datasets[0].data = toPointsEeg(bufs.eeg2.toArray(), e);
-  Object.values(charts).forEach(c => c.update('none'));
-}
-
-// ==================== 滤波 ====================
-function apply(arr, f) { return f ? arr.map(v => f.process(v)) : arr; }
-
-function recreateFilters() {
-  const fs = EEG_FS;
-  filters.eeg1Hp = S.eegHp ? new DigitalFilter(biquadHP(fs, 0.5).b, biquadHP(fs, 0.5).a) : null;
-  filters.eeg2Hp = S.eegHp ? new DigitalFilter(biquadHP(fs, 0.5).b, biquadHP(fs, 0.5).a) : null;
-  filters.eeg1Lp = S.eegLp ? new DigitalFilter(biquadLP(fs, S.eegLpF).b, biquadLP(fs, S.eegLpF).a) : null;
-  filters.eeg2Lp = S.eegLp ? new DigitalFilter(biquadLP(fs, S.eegLpF).b, biquadLP(fs, S.eegLpF).a) : null;
-  filters.eeg1Notch = S.eegNotch ? new DigitalFilter(biquadNotch(fs, S.notchFreq).b, biquadNotch(fs, S.notchFreq).a) : null;
-  filters.eeg2Notch = S.eegNotch ? new DigitalFilter(biquadNotch(fs, S.notchFreq).b, biquadNotch(fs, S.notchFreq).a) : null;
-
-  const fo = OTHER_FS;
-  filters.accXHp = S.accHp ? new DigitalFilter(biquadHP(fo, 0.5).b, biquadHP(fo, 0.5).a) : null;
-  filters.accYHp = S.accHp ? new DigitalFilter(biquadHP(fo, 0.5).b, biquadHP(fo, 0.5).a) : null;
-  filters.accZHp = S.accHp ? new DigitalFilter(biquadHP(fo, 0.5).b, biquadHP(fo, 0.5).a) : null;
-  filters.gyroXHp = S.gyroHp ? new DigitalFilter(biquadHP(fo, 0.5).b, biquadHP(fo, 0.5).a) : null;
-  filters.gyroYHp = S.gyroHp ? new DigitalFilter(biquadHP(fo, 0.5).b, biquadHP(fo, 0.5).a) : null;
-  filters.gyroZHp = S.gyroHp ? new DigitalFilter(biquadHP(fo, 0.5).b, biquadHP(fo, 0.5).a) : null;
-  filters.ppgHp = S.ppgHp ? new DigitalFilter(biquadHP(fo, 0.5).b, biquadHP(fo, 0.5).a) : null;
-  filters.hrHp = S.hrHp ? new DigitalFilter(biquadHP(fo, 0.5).b, biquadHP(fo, 0.5).a) : null;
-}
-
-// ==================== 数据接收 ====================
-function onImuData(rows) {
-  if (!rows.length) return;
-  const r = rows, n = r.length;
-  let ax = new Array(n), ay = new Array(n), az = new Array(n);
-  let gx = new Array(n), gy = new Array(n), gz = new Array(n);
-  let ppg = new Array(n), hr = new Array(n);
-  for (let i = 0; i < n; i++) {
-    ax[i] = r[i][0]; ay[i] = r[i][1]; az[i] = r[i][2];
-    gx[i] = r[i][3]; gy[i] = r[i][4]; gz[i] = r[i][5];
-    ppg[i] = r[i][6]; hr[i] = r[i][7];
-  }
-  bufs.accX.pushBatch(apply(ax, filters.accXHp));
-  bufs.accY.pushBatch(apply(ay, filters.accYHp));
-  bufs.accZ.pushBatch(apply(az, filters.accZHp));
-  bufs.gyroX.pushBatch(apply(gx, filters.gyroXHp));
-  bufs.gyroY.pushBatch(apply(gy, filters.gyroYHp));
-  bufs.gyroZ.pushBatch(apply(gz, filters.gyroZHp));
-  bufs.ppg.pushBatch(apply(ppg, filters.ppgHp));
-  bufs.hr.pushBatch(apply(hr, filters.hrHp));
-  scheduleRedraw();
-}
-
-function onEegData(rows) {
-  if (!rows.length) return;
-  const r = rows, n = r.length;
-  let e1 = new Array(n), e2 = new Array(n);
-  for (let i = 0; i < n; i++) { e1[i] = r[i][0]; e2[i] = r[i][1]; }
-  e1 = apply(apply(apply(e1, filters.eeg1Hp), filters.eeg1Lp), filters.eeg1Notch);
-  e2 = apply(apply(apply(e2, filters.eeg2Hp), filters.eeg2Lp), filters.eeg2Notch);
-  bufs.eeg1.pushBatch(e1);
-  bufs.eeg2.pushBatch(e2);
-  scheduleRedraw();
-}
-
-// ==================== BLE ====================
-function updateUI() {
-  document.getElementById('connectionStatus').textContent = S.connected ? `已连接${S.device?.name||''}` : '未连接';
-  document.getElementById('statusDot').className = 'status-dot' + (S.connected ? ' connected' : '');
-  document.getElementById('connectBtn').disabled = !S.device || S.connected;
-  document.getElementById('disconnectBtn').disabled = !S.connected;
-  document.getElementById('startBtn').disabled = !S.connected || S.collecting;
-  document.getElementById('stopBtn').disabled = !S.connected || !S.collecting;
-}
-
-function log(msg) {
-  const box = document.getElementById('logBox');
-  box.value += `[${localTimestamp()}] ${msg}\n`;
-  box.scrollTop = box.scrollHeight;
-}
-
-async function doScan(scanAll) {
-  try {
-    const opts = scanAll ? { acceptAllDevices: true, optionalServices: CANDIDATE_SVCS }
-      : { filters: [{ namePrefix: 'CONIX' }], optionalServices: CANDIDATE_SVCS };
-    const d = await navigator.bluetooth.requestDevice(opts);
-    S.device = d;
-    S.deviceName = d.name || null;  // 保存设备名称
-    d.addEventListener('gattserverdisconnected', onDC);
-    log(`找到设备: ${d.name||'未知'}`);
-    updateUI();
-  } catch (e) {
-    let msg = '扫描失败: ';
-    if (e.name === 'NotFoundError') msg += scanAll ? '未发现 BLE 设备' : '未找到 CONIX 设备，试试扫描所有设备';
-    else if (e.name === 'SecurityError') msg += '请在 HTTPS 环境下使用';
-    else if (e.name === 'NotAllowedError') msg += '用户取消了选择';
-    else msg += e.message;
-    log(msg);
-  }
-}
-
-/** 发送时钟同步命令 */
-async function sendSyncTime() {
-  if (!S.writeCh) return;
-  try {
-    const cmd = createSyncTimeCmd();
-    const timestamp = Math.floor(Date.now() / 1000);
-    if (S.writeCh.writeValueWithoutResponse) await S.writeCh.writeValueWithoutResponse(cmd);
-    else await S.writeCh.writeValue(cmd);
-    log(`时钟同步命令已发送，时间戳: ${timestamp} (0x${timestamp.toString(16).toUpperCase().padStart(8, '0')})`);
-  } catch(e) {
-    log(`发送时钟同步命令失败: ${e.message}`);
-  }
-}
-
-async function doConnect() {
-  if (!S.device) return;
-  try {
-    log('连接中...');
-    S.server = await S.device.gatt.connect();
-    let found = false;
-    for (const svcUuid of CANDIDATE_SVCS) {
-      try {
-        const svc = await S.server.getPrimaryService(svcUuid);
-        log(`找到服务 ${svcUuid}`);
-        const chars = await svc.getCharacteristics();
-        for (const ch of chars) {
-          const p = ch.properties;
-          const propNames = [];
-          if (p.notify) propNames.push('notify');
-          if (p.read) propNames.push('read');
-          if (p.write) propNames.push('write');
-          if (p.writeWithoutResponse) propNames.push('write-without-response');
-          if (p.indicate) propNames.push('indicate');
-          if (p.notify && !S.notifyCh) S.notifyCh = ch;
-          if ((p.write || p.writeWithoutResponse) && !S.writeCh) S.writeCh = ch;
-          log(`  特征 ${ch.uuid} [${propNames.join(', ')}]`);
-        }
-        if (S.notifyCh || S.writeCh) { found = true; break; }
-      } catch (e) { /* 跳过 */ }
+  cls.prototype._tryPopOne = function(){
+    const [headIdx, headType] = findEarliestHead(this._buf);
+    if(headType < 0){
+      // 没找到帧头，保留最后 1 字节（防跨段帧头截断）
+      if(this._buf.length > 1) this._buf.length = 1;
+      return null;
     }
-    if (!S.notifyCh && !S.writeCh) throw new Error('未找到可用特征');
-    if (S.notifyCh) { await S.notifyCh.startNotifications(); S.notifyCh.addEventListener('characteristicvaluechanged', onData); }
-    if (!S.writeCh) S.writeCh = S.notifyCh;
-    
-    await sendSyncTime();
-    
-    const deviceType = getDeviceType(S.deviceName);
-    S.connected = true;
-    log(`蓝牙连接成功，设备类型: ${deviceType}`);
-    updateUI();
-  } catch (e) {
-    log(`连接失败: ${e.message}`);
+    if(headIdx > 0) this._buf.splice(0, headIdx);
+
+    let headerLen, dataOff;
+    if(headType === FT_CMD){ headerLen = CMD_HEADER_LEN; dataOff = CMD_OFF_DATA; }
+    else if(headType === FT_EEG){ headerLen = EEG_HEADER_LEN; dataOff = EEG_OFF_DATA; }
+    else { headerLen = DATA_HEADER_LEN; dataOff = DATA_OFF_DATA; }
+
+    if(this._buf.length < headerLen) return null;
+
+    let dataLen;
+    if(headType === FT_CMD){
+      dataLen = this._buf[CMD_OFF_LEN];
+    } else {
+      const ln = u16be(this._buf, DATA_OFF_LEN);
+      dataLen = (headType === FT_EEG) ? (ln - 1) : ln;
+    }
+    const totalLen = headerLen + dataLen + CRC_LEN;
+    if(this._buf.length < totalLen) return null;
+
+    // 提取整帧
+    const fb = this._buf.slice(0, totalLen);
+    // CRC 校验：帧头到数据末尾（不含 CRC）
+    const crcRecv = u16be(fb, totalLen - CRC_LEN);
+    const crcCalc = crc16_ccitt_false(fb.slice(0, totalLen - CRC_LEN));
+    if(crcRecv !== crcCalc){
+      this.crcErrors++;
+      this._buf.splice(0,1); // 丢弃 1 字节继续扫描
+      return null;
+    }
+    // CRC 通过，移除整帧
+    this._buf.splice(0, totalLen);
+
+    if(headType === FT_CMD){
+      const seq = u16be(fb, CMD_OFF_SEQ);
+      const dev = fb[CMD_OFF_DEV];
+      const cmdCode = fb[CMD_OFF_CODE];
+      const payload = fb.slice(CMD_OFF_DATA, CMD_OFF_DATA + dataLen);
+      return {type:"cmd", seq, deviceCode:dev, cmdCode, dataLength:dataLen, payload};
+    }
+    if(headType === FT_EEG){
+      const packetNo = u32be(fb, DATA_OFF_PKT);
+      const timestampMs = u32be(fb, DATA_OFF_TS);
+      const leadoff = fb[EEG_OFF_LEADOFF];
+      const payload = fb.slice(EEG_OFF_DATA, EEG_OFF_DATA + dataLen);
+      return {type:"eeg", packetNo, timestampMs, payload, leadoff};
+    }
+    // PPG / IMU
+    const packetNo = u32be(fb, DATA_OFF_PKT);
+    const timestampMs = u32be(fb, DATA_OFF_TS);
+    const payload = fb.slice(DATA_OFF_DATA, DATA_OFF_DATA + dataLen);
+    return {type: headType===FT_PPG?"ppg":"imu", packetNo, timestampMs, payload, leadoff:null};
+  };
+  return cls;
+})();
+
+/* ============================================================
+ * 四、载荷解析
+ * ============================================================ */
+function toSigned24(v){ return v > 0x7FFFFF ? v - 0x1000000 : v; }
+function toSigned16(v){ return v > 0x7FFF ? v - 0x10000 : v; }
+
+// EEG: 6B/样本，双通道 24bit 有符号大端 -> μV
+function parseEegPayload(payload){
+  const BPS = 6;
+  const n = (payload.length / BPS) | 0;
+  const out = [[],[]];
+  for(let i=0;i<n;i++){
+    const b = i*BPS;
+    let ch1 = (payload[b]<<16)|(payload[b+1]<<8)|payload[b+2];
+    let ch2 = (payload[b+3]<<16)|(payload[b+4]<<8)|payload[b+5];
+    ch1 = toSigned24(ch1); ch2 = toSigned24(ch2);
+    out[0].push(ch1 * EEG_LSB * 1e6); // μV
+    out[1].push(ch2 * EEG_LSB * 1e6);
+  }
+  return out; // [[ch1...],[ch2...]]
+}
+// PPG: 6B/样本，双通道 24bit 有符号大端 -> raw（不乘 LSB）
+function parsePpgPayload(payload){
+  const BPS = 6;
+  const n = (payload.length / BPS) | 0;
+  const out = [[],[]];
+  for(let i=0;i<n;i++){
+    const b = i*BPS;
+    let ch1 = (payload[b]<<16)|(payload[b+1]<<8)|payload[b+2];
+    let ch2 = (payload[b+3]<<16)|(payload[b+4]<<8)|payload[b+5];
+    out[0].push(toSigned24(ch1));
+    out[1].push(toSigned24(ch2));
+  }
+  return out;
+}
+// IMU: 12B/样本，6×int16 小端 [gx,gy,gz,ax,ay,az]
+// payload 为普通 Array（来自 FrameParser 的 slice），无 ArrayBuffer，故手动按小端读 int16
+function readS16LE(arr, off){
+  let v = (arr[off]) | (arr[off+1] << 8);
+  v = v & 0xFFFF;
+  return v > 0x7FFF ? v - 0x10000 : v;
+}
+function parseImuPayload(payload){
+  const BPS = 12;
+  const n = (payload.length / BPS) | 0;
+  const out = {gx:[],gy:[],gz:[],ax:[],ay:[],az:[]};
+  const keys = ["gx","gy","gz","ax","ay","az"];
+  for(let i=0;i<n;i++){
+    for(let j=0;j<6;j++){
+      const v = readS16LE(payload, i*BPS + j*2); // 小端 int16
+      out[keys[j]].push(v);
+    }
+  }
+  // 物理量换算：ax..az / acc_scale ; gx..gz / gyro_scale
+  for(let i=0;i<n;i++){
+    out.ax[i] = out.ax[i]/ACC_SCALE;
+    out.ay[i] = out.ay[i]/ACC_SCALE;
+    out.az[i] = out.az[i]/ACC_SCALE;
+    out.gx[i] = out.gx[i]/GYRO_SCALE;
+    out.gy[i] = out.gy[i]/GYRO_SCALE;
+    out.gz[i] = out.gz[i]/GYRO_SCALE;
+  }
+  return out;
+}
+
+/* ============================================================
+ * 五、Biquad 滤波器（标准公式，流式连续）
+ * ============================================================ */
+class BiquadFilter{
+  constructor(type, fs, freq, Q, freq2){
+    Q = (Q===undefined)? (1/Math.SQRT2) : Q;
+    const w0 = 2*Math.PI*freq/fs;
+    const cos = Math.cos(w0), sin = Math.sin(w0);
+    const alpha = sin/(2*Q);
+    let b0,b1,b2,a0,a1,a2;
+    if(type==="lowpass"){
+      b0=(1-cos)/2; b1=1-cos; b2=(1-cos)/2; a0=1+alpha; a1=-2*cos; a2=1-alpha;
+    } else if(type==="highpass"){
+      b0=(1+cos)/2; b1=-(1+cos); b2=(1+cos)/2; a0=1+alpha; a1=-2*cos; a2=1-alpha;
+    } else if(type==="bandpass"){
+      b0=alpha; b1=0; b2=-alpha; a0=1+alpha; a1=-2*cos; a2=1-alpha;
+    } else if(type==="notch"){
+      b0=1; b1=-2*cos; b2=1; a0=1+alpha; a1=-2*cos; a2=1-alpha;
+    } else { b0=1; b1=0; b2=0; a0=1; a1=0; a2=0; }
+    this.b0=b0/a0; this.b1=b1/a0; this.b2=b2/a0; this.a1=a1/a0; this.a2=a2/a0;
+    this.x1=0; this.x2=0; this.y1=0; this.y2=0;
+  }
+  process(x){
+    const y = this.b0*x + this.b1*this.x1 + this.b2*this.x2 - this.a1*this.y1 - this.a2*this.y2;
+    this.x2=this.x1; this.x1=x;
+    this.y2=this.y1; this.y1=y;
+    return y;
+  }
+  processBatch(arr){
+    const out = new Array(arr.length);
+    for(let i=0;i<arr.length;i++) out[i]=this.process(arr[i]);
+    return out;
+  }
+  reset(){ this.x1=this.x2=this.y1=this.y2=0; }
+}
+const createLowpass = (fs,cutoff)=> new BiquadFilter("lowpass", fs, cutoff, 1/Math.SQRT2);
+const createHighpass= (fs,cutoff)=> new BiquadFilter("highpass",fs, cutoff, 1/Math.SQRT2);
+function createBandpass(fs, lo, hi){
+  // 串联 highpass + lowpass 近似带通（保持状态）
+  return {hp:createHighpass(fs,lo), lp:createLowpass(fs,hi),
+    process(x){ return this.lp.process(this.hp.process(x)); },
+    processBatch(arr){ const a=this.hp.processBatch(arr); return this.lp.processBatch(a); },
+    reset(){ this.hp.reset(); this.lp.reset(); }
+  };
+}
+function createNotch(fs, freq){ return new BiquadFilter("notch", fs, freq, 30); }
+
+/* ============================================================
+ * 六、全局状态
+ * ============================================================ */
+const state = {
+  // 采样率
+  eegFs: EEG_FS_DEFAULT, ppgFs: PPG_FS_DEFAULT, imuFs: IMU_FS_DEFAULT,
+  // 环形 buffer（每通道一个 Float32Array）+ 写入游标
+  sweepEeg: null, sweepPpg: null, sweepAcc: null, sweepGyro: null,
+  wpEeg:0, wpPpg:0, wpAcc:0, wpGyro:0,
+  // 滤波器
+  filters:{},
+  filterEnabled:{eeg_hp:false,eeg_lp:false,eeg_notch:false,ppg_bp:false,acc_lp:false,gyro_lp:false},
+  eegLpFreq:30, notchFreq:50,
+  eegLeadoff:0,
+  // 多通道分轨
+  mode:"stacked",                 // EEG/PPG 共用模式（与 Python v2 一致）
+  eegYlim:200, ppgYlim:100, accYlim:2, gyroYlim:200,
+  eegSpacing:2*200, ppgSpacing:2*100,
+  eegOffsets:[0,0], ppgOffsets:[0,0],
+  // dirty
+  dirtyEeg:false, dirtyPpg:false, dirtyImu:false,
+  // BLE
+  btDevice:null, btServer:null, writeChar:null, notifyChar:null,
+  connState:"disconnected", isCollecting:false, isSaving:false,
+  // 统计
+  eegCount:0, ppgCount:0, imuCount:0, crcErr:0, frameCount:0,
+  lastNotifyTs:null,
+  // 存储
+  store:{eeg:[], ppg:[], imu:[]},
+  rawStore:[],           // 原始数据缓存：每项 = "iso_local,hex"
+  rawStartTs: null,      // 采集开始时间（用于计算时长）
+  rawEndTs: null,        // 采集结束时间（用于计算时长）
+  // seq
+  seq:0,
+  parser:new FrameParser(),
+  // 回放状态
+  playback:{
+    frames: [],          // 解析出的所有帧
+    eegFrames: [],       // EEG 帧列表
+    ppgFrames: [],       // PPG 帧列表
+    imuFrames: [],       // IMU 帧列表
+    isPlaying: false,    // 是否播放中
+    isLoaded: false,     // 是否已加载文件
+    playIndex: 0,        // 当前播放位置（帧索引）
+    playSpeed: 1.0,      // 播放速度
+    playTimer: null,     // 播放定时器
+    totalDuration: 0,    // 总时长（秒）
+    currentTime: 0,      // 当前时间（秒）
+    startTime: 0,        // 第一帧的时间戳（ms）
+    endTime: 0,          // 最后一帧的时间戳（ms）
+    mode: 'realtime'     // 'realtime' 或 'playback'
+  }
+};
+
+/* ============================================================
+ * 七、Canvas 初始化 + 高 DPI 适配
+ * ============================================================ */
+const canvases = {
+  eeg:document.getElementById("eeg-canvas"),
+  ppg:document.getElementById("ppg-canvas"),
+  acc:document.getElementById("acc-canvas"),
+  gyro:document.getElementById("gyro-canvas")
+};
+function fitCanvas(c){
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth, h = c.clientHeight;
+  c.width = Math.max(1, Math.floor(w*dpr));
+  c.height = Math.max(1, Math.floor(h*dpr));
+  const ctx = c.getContext("2d");
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  return ctx;
+}
+function canvasSize(c){ return {w:c.clientWidth, h:c.clientHeight}; }
+
+/* ============================================================
+ * 八、绘制：网格 / 轴标签 / 波形 / 扫描线
+ * ============================================================ */
+function drawGrid(ctx, w, h){
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle = C.grid;
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.35;
+  // 竖线（时间，每 1s）
+  for(let s=0; s<=SHOW_SECONDS; s++){
+    const x = s/SHOW_SECONDS*w;
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
+  }
+  // 横线
+  const rows = 6;
+  for(let i=0;i<=rows;i++){
+    const y = i/rows*h;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+function drawAxisLabels(ctx, w, h, ylabel, xlim){
+  ctx.fillStyle = C.text;
+  ctx.font = "12px 'Microsoft YaHei',monospace";
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillText(ylabel, 4, 2);
+  ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  for(let s=0;s<=SHOW_SECONDS;s+=2){
+    const x = s/SHOW_SECONDS*w;
+    ctx.fillText(s+"s", x, h-1);
+  }
+}
+// 右上角图例（X/Y/Z 三色色块 + 标签）
+function drawAxisLegend(ctx, w, labels, colors){
+  ctx.font = "12px 'Microsoft YaHei',monospace";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  const pad = 6, boxW = 12, boxH = 10, gap = 4, itemGap = 10;
+  let totalW = 0;
+  for(let i=0;i<labels.length;i++){
+    totalW += boxW + gap + ctx.measureText(labels[i]).width + itemGap;
+  }
+  totalW -= itemGap;
+  let x = w - totalW - pad;
+  const y = 8;
+  for(let i=0;i<labels.length;i++){
+    ctx.fillStyle = colors[i];
+    ctx.fillRect(x, y, boxW, boxH);
+    x += boxW + gap;
+    ctx.fillStyle = C.text;
+    ctx.fillText(labels[i], x, y + boxH/2);
+    x += ctx.measureText(labels[i]).width + itemGap;
+  }
+}
+// 通用波形绘制：buffer=Float32Array, offsets=number[], colors=string[], viewRange, wp, n
+function drawWave(ctx, w, h, buffers, offsets, colors, viewRange, wp, leadoffMask){
+  const n = buffers[0].length;
+  const midY = h/2;
+  const halfH = h/2 - 16; // 留边距
+  // 基线虚线（每通道 offset 位置）
+  ctx.setLineDash([2,3]);
+  ctx.lineWidth = 1;
+  for(let ch=0; ch<buffers.length; ch++){
+    const off = offsets[ch];
+    const yBase = midY - off/viewRange*halfH;
+    ctx.strokeStyle = colors[ch];
+    ctx.globalAlpha = 0.3;
+    ctx.beginPath(); ctx.moveTo(0,yBase); ctx.lineTo(w,yBase); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.setLineDash([]);
+  // 通道名标签（左侧）
+  ctx.font = "11px 'Microsoft YaHei',monospace";
+  ctx.textAlign="left"; ctx.textBaseline="middle";
+  for(let ch=0; ch<buffers.length; ch++){
+    const off = offsets[ch];
+    const yBase = midY - off/viewRange*halfH;
+    const leadoff = (leadoffMask!==undefined) && ((leadoffMask>>ch)&1);
+    ctx.fillStyle = leadoff ? C.warn : colors[ch];
+    ctx.fillText("Ch"+(ch+1), 4, Math.max(10, Math.min(h-10,yBase)));
+  }
+  // 波形
+  for(let ch=0; ch<buffers.length; ch++){
+    const off = offsets[ch];
+    const buf = buffers[ch];
+    const leadoff = (leadoffMask!==undefined) && ((leadoffMask>>ch)&1);
+    if(leadoff){
+      ctx.strokeStyle = C.warn;
+      ctx.setLineDash([4,3]);
+    } else {
+      ctx.strokeStyle = colors[ch];
+      ctx.setLineDash([]);
+    }
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for(let i=0;i<n;i++){
+      const x = i/n*w;
+      const v = buf[i] + off;
+      let y = midY - v/viewRange*halfH;
+      if(y<0) y=0; if(y>h) y=h;
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  // 扫描线（跟随写入位置）
+  const scanX = n>0 ? (wp/n*w) : 0;
+  ctx.strokeStyle = C.accent;
+  ctx.setLineDash([4,4]);
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(scanX,0); ctx.lineTo(scanX,h); ctx.stroke();
+  ctx.setLineDash([]);
+}
+function redrawAll(){
+  if(state.dirtyEeg){
+    state.dirtyEeg = false;
+    const c = canvases.eeg; const {w,h} = canvasSize(c); const ctx = fitCanvas(c);
+    drawGrid(ctx,w,h);
+    const viewRange = (state.mode==="superimposed") ? state.eegYlim : (Math.abs(state.eegOffsets[0])+state.eegYlim);
+    if(state.sweepEeg) drawWave(ctx,w,h,state.sweepEeg,state.eegOffsets,C.eeg,viewRange,state.wpEeg,state.eegLeadoff);
+    drawAxisLabels(ctx,w,h,"EEG (μV)");
+  }
+  if(state.dirtyPpg){
+    state.dirtyPpg = false;
+    const c = canvases.ppg; const {w,h} = canvasSize(c); const ctx = fitCanvas(c);
+    drawGrid(ctx,w,h);
+    const viewRange = (state.mode==="superimposed") ? state.ppgYlim : (Math.abs(state.ppgOffsets[0])+state.ppgYlim);
+    if(state.sweepPpg) drawWave(ctx,w,h,state.sweepPpg,state.ppgOffsets,C.ppg,viewRange,state.wpPpg);
+    drawAxisLabels(ctx,w,h,"PPG");
+  }
+  if(state.dirtyImu){
+    state.dirtyImu = false;
+    // ACC
+    let c = canvases.acc; let {w,h} = canvasSize(c); let ctx = fitCanvas(c);
+    drawGrid(ctx,w,h);
+    if(state.sweepAcc) drawWave(ctx,w,h,state.sweepAcc,[0,0,0],C.acc,state.accYlim,state.wpAcc);
+    drawAxisLabels(ctx,w,h,"ACC (g)");
+    drawAxisLegend(ctx,w,["X","Y","Z"],C.acc);
+    // GYRO
+    c = canvases.gyro; const sz = canvasSize(c); w=sz.w; h=sz.h; ctx = fitCanvas(c);
+    drawGrid(ctx,w,h);
+    if(state.sweepGyro) drawWave(ctx,w,h,state.sweepGyro,[0,0,0],C.gyro,state.gyroYlim,state.wpGyro);
+    drawAxisLabels(ctx,w,h,"GYRO (dps)");
+    drawAxisLegend(ctx,w,["X","Y","Z"],C.gyro);
+  }
+}
+// 全量强制刷新（断开/重置后）
+function refreshAllPlots(){
+  state.dirtyEeg = state.dirtyPpg = state.dirtyImu = true;
+  redrawAll();
+}
+
+/* ============================================================
+ * 九、环形 buffer 写入 + 滤波
+ * ============================================================ */
+function makeSweep(nCh, n){
+  const arr = [];
+  for(let i=0;i<nCh;i++) arr.push(new Float32Array(n));
+  return arr;
+}
+function resetSweepAndFilters(){
+  const nEeg = (state.eegFs*SHOW_SECONDS)|0;
+  const nPpg = (state.ppgFs*SHOW_SECONDS)|0;
+  const nImu = (state.imuFs*SHOW_SECONDS)|0;
+  state.sweepEeg = makeSweep(2, nEeg);
+  state.sweepPpg = makeSweep(2, nPpg);
+  state.sweepAcc = makeSweep(3, nImu);
+  state.sweepGyro = makeSweep(3, nImu);
+  state.wpEeg = state.wpPpg = state.wpAcc = state.wpGyro = 0;
+  // 滤波器状态重置（不清除 filterEnabled，但清实例）
+  state.filters = {};
+  for(const k in state.filterEnabled) state.filterEnabled[k]=false;
+  // 同步 UI 复选框
+  ["eeg-hp","eeg-lp","eeg-notch","ppg-bp","acc-lp","gyro-lp"].forEach(id=>{
+    const el = document.getElementById(id); if(el) el.checked = false;
+  });
+  state.eegLeadoff = 0;
+  // dirty
+  state.dirtyEeg = state.dirtyPpg = state.dirtyImu = false;
+}
+function writeRing(buffers, wp, srcArr, nCh){
+  const n = buffers[0].length;
+  const m = srcArr[0].length;
+  for(let ch=0; ch<nCh; ch++){
+    const src = srcArr[ch];
+    const buf = buffers[ch];
+    let end = wp + m;
+    if(end <= n){
+      buf.set(src.subarray?src.subarray(0,m):src.slice(0,m), wp);
+    } else {
+      const split = n - wp;
+      for(let i=0;i<split;i++) buf[wp+i] = src[i];
+      for(let i=0;i<m-split;i++) buf[i] = src[split+i];
+    }
+  }
+  return (wp + m) % n;
+}
+
+function onEegData(ch1Arr, ch2Arr){
+  let e1 = ch1Arr, e2 = ch2Arr;
+  if(state.filterEnabled.eeg_hp){
+    e1 = state.filters.eeg1_hp.processBatch(e1);
+    e2 = state.filters.eeg2_hp.processBatch(e2);
+  }
+  if(state.filterEnabled.eeg_lp){
+    e1 = state.filters.eeg1_lp.processBatch(e1);
+    e2 = state.filters.eeg2_lp.processBatch(e2);
+  }
+  if(state.filterEnabled.eeg_notch){
+    e1 = state.filters.eeg1_notch.processBatch(e1);
+    e2 = state.filters.eeg2_notch.processBatch(e2);
+  }
+  state.wpEeg = writeRing(state.sweepEeg, state.wpEeg, [e1,e2], 2);
+  state.dirtyEeg = true;
+}
+function onPpgData(ch1Arr, ch2Arr){
+  let p1 = ch1Arr, p2 = ch2Arr;
+  if(state.filterEnabled.ppg_bp){
+    p1 = state.filters.ppg1_bp.processBatch(p1);
+    p2 = state.filters.ppg2_bp.processBatch(p2);
+  }
+  state.wpPpg = writeRing(state.sweepPpg, state.wpPpg, [p1,p2], 2);
+  state.dirtyPpg = true;
+}
+function onImuData(imu){
+  // imu: {gx,gy,gz,ax,ay,az} 各为数组
+  let acc = [imu.ax.slice(), imu.ay.slice(), imu.az.slice()];
+  let gyro = [imu.gx.slice(), imu.gy.slice(), imu.gz.slice()];
+  if(state.filterEnabled.acc_lp){
+    for(let j=0;j<3;j++) acc[j] = state.filters["acc_"+j+"_lp"].processBatch(acc[j]);
+  }
+  if(state.filterEnabled.gyro_lp){
+    for(let j=0;j<3;j++) gyro[j] = state.filters["gyro_"+j+"_lp"].processBatch(gyro[j]);
+  }
+  state.wpAcc = writeRing(state.sweepAcc, state.wpAcc, acc, 3);
+  state.wpGyro = writeRing(state.sweepGyro, state.wpGyro, gyro, 3);
+  state.dirtyImu = true;
+}
+
+/* ============================================================
+ * 十、多通道分轨：偏移计算 + 显示模式应用
+ * ============================================================ */
+function computeOffsets(n, spacing){
+  if(state.mode==="superimposed") return new Array(n).fill(0);
+  const off = [];
+  for(let i=0;i<n;i++) off.push(-(i - (n-1)/2)*spacing);
+  return off;
+}
+function applyEegDisplayMode(){
+  state.eegOffsets = computeOffsets(2, state.eegSpacing);
+  document.getElementById("eeg-spacing").textContent = state.eegSpacing.toFixed(0);
+}
+function applyPpgDisplayMode(){
+  state.ppgOffsets = computeOffsets(2, state.ppgSpacing);
+  document.getElementById("ppg-spacing").textContent = state.ppgSpacing.toFixed(0);
+}
+function setDisplayMode(mode){
+  state.mode = mode;
+  if(mode==="stacked"){
+    state.eegSpacing = 2.0*state.eegYlim;
+    state.ppgSpacing = 2.0*state.ppgYlim;
+  } else if(mode==="centered"){
+    state.eegSpacing = 0.8*state.eegYlim;
+    state.ppgSpacing = 0.8*state.ppgYlim;
+  } else {
+    state.eegSpacing = 0; state.ppgSpacing = 0;
+  }
+  applyEegDisplayMode(); applyPpgDisplayMode();
+  // 互斥选中
+  document.querySelectorAll(".mode-btn").forEach(b=>{
+    b.classList.toggle("active", b.dataset.mode===mode);
+  });
+  log("切换显示模式: "+({stacked:"堆叠",superimposed:"叠加",centered:"居中"})[mode]);
+  refreshAllPlots();
+}
+
+/* ============================================================
+ * 十一、Web Bluetooth 连接
+ * ============================================================ */
+function setConnState(s){
+  state.connState = s;
+  const dot = document.getElementById("conn-dot");
+  const txt = document.getElementById("conn-state");
+  const map = {
+    disconnected:[C.warn,"未连接"], connecting:[C.ppg2,"连接中"],
+    connected:[C.ppg1,"已连接"], lost:[C.warn,"连接丢失"]
+  };
+  const [color,text] = map[s]||[C.warn,"未知"];
+  dot.style.color = color; txt.style.color = color; txt.textContent = text;
+  // 按钮启用
+  const conn = (s==="connected");
+  document.getElementById("connect-btn").disabled = conn;
+  document.getElementById("disconnect-btn").disabled = !conn;
+  document.getElementById("scan-btn").disabled = conn;
+  document.getElementById("start-btn").disabled = !conn;
+  document.getElementById("stop-btn").disabled = !conn;
+}
+async function scanDevices(){
+  if(!navigator.bluetooth){ setStatus("当前浏览器不支持 Web Bluetooth（请用 Chrome/Edge）"); return; }
+  try{
+    setStatus("请选择 CONIX_SLEEP 设备...");
+    const device = await navigator.bluetooth.requestDevice({
+      filters:[{namePrefix:DEVICE_NAME_FILTER}],
+      optionalServices:[SERVICE_UUID]
+    });
+    state.btDevice = device;
+    device.addEventListener("gattserverdisconnected", onGattDisconnected);
+    const sel = document.getElementById("device-list");
+    sel.innerHTML = "";
+    const opt = document.createElement("option");
+    opt.value = device.id;
+    opt.textContent = (device.name||"CONIX_SLEEP") + "  -  " + device.id;
+    sel.appendChild(opt);
+    setStatus("已选择设备: "+(device.name||"未知")+"，点击连接");
+  }catch(e){
+    setStatus("扫描/选择取消或失败: "+e.message);
+  }
+}
+async function connectDevice(){
+  if(!state.btDevice){ setStatus("请先扫描并选择设备"); return; }
+  try{
+    setConnState("connecting");
+    setStatus("连接中...");
+    const server = await state.btDevice.gatt.connect();
+    state.btServer = server;
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    state.writeChar = await service.getCharacteristic(WRITE_UUID);
+    state.notifyChar = await service.getCharacteristic(NOTIFY_UUID);
+    state.notifyChar.addEventListener("characteristicvaluechanged", onNotify);
+    await state.notifyChar.startNotifications();
+    setConnState("connected");
+    state.lastNotifyTs = Date.now();
+    setStatus("已连接，等待启动采集");
+    log("已连接设备: "+(state.btDevice.name||"未知"));
+    log("NOTIFY UUID: "+NOTIFY_UUID);
+    log("WRITE UUID: "+WRITE_UUID);
+  }catch(e){
+    setConnState("disconnected");
+    setStatus("连接失败: "+e.message);
+    log("连接失败: "+e.message);
+  }
+}
+async function disconnectDevice(){
+  try{
+    if(state.isCollecting){ await stopCollect(); }
+    if(state.notifyChar){
+      try{ await state.notifyChar.stopNotifications(); }catch(e){}
+    }
+    if(state.btDevice && state.btDevice.gatt.connected){
+      state.btDevice.gatt.disconnect();
+    }
+  }catch(e){
+    log("断开失败: "+e.message);
+  }
+  setConnState("disconnected");
+  setStatus("已断开");
+  resetSweepAndFilters();
+  refreshAllPlots();
+}
+function onGattDisconnected(){
+  if(state.connState==="disconnected") return; // 主动断开已处理
+  setConnState("lost");
+  setStatus("连接丢失: GATT 断开，请重新连接");
+  log("连接丢失: GATT 断开");
+  if(state.isCollecting){ state.isCollecting=false; state.isSaving=false; }
+}
+// notify 回调
+let notifyCount = 0;
+function onNotify(event){
+  try{
+    state.lastNotifyTs = Date.now();
+    const dv = event.target.value;
+    const data = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+    notifyCount++;
+    if(notifyCount<=3){
+      let hex=""; for(let i=0;i<Math.min(16,data.length);i++) hex+=data[i].toString(16).padStart(2,"0").toUpperCase();
+      log("收到数据 #"+notifyCount+": "+data.length+"B "+hex+"...");
+    }
+    // 原始流保存：每条 notify 存一行 "iso_local,hex"
+    if(state.isSaving){
+      const now = Date.now();
+      if(state.rawStartTs === null) state.rawStartTs = now;
+      state.rawEndTs = now;
+      let hex=""; for(let i=0;i<data.length;i++) hex+=data[i].toString(16).padStart(2,"0");
+      state.rawStore.push(formatLocalTime(now)+","+hex);
+    }
+    // 流式解析
+    const frames = state.parser.feed(data);
+    for(const f of frames) dispatchFrame(f);
+    // 心跳恢复
+    if(state.connState!=="connected") setConnState("connected");
+  }catch(e){
+    log("数据处理错误: "+e.message);
+  }
+}
+function dispatchFrame(f){
+  state.frameCount++;
+  if(f.type==="cmd"){
+    handleCommandResponse(f);
+    return;
+  }
+  if(f.type==="eeg"){
+    const [ch1,ch2] = parseEegPayload(f.payload);
+    if(ch1.length>0){
+      state.eegCount += ch1.length;
+      onEegData(ch1, ch2);
+      if(state.isSaving){
+        for(let i=0;i<ch1.length;i++)
+          state.store.eeg.push([f.packetNo, f.timestampMs+i, ch1[i], ch2[i]]);
+      }
+      if(f.leadoff!==null) state.eegLeadoff = f.leadoff;
+    }
+  } else if(f.type==="ppg"){
+    const [ch1,ch2] = parsePpgPayload(f.payload);
+    if(ch1.length>0){
+      state.ppgCount += ch1.length;
+      onPpgData(ch1, ch2);
+      if(state.isSaving){
+        for(let i=0;i<ch1.length;i++)
+          state.store.ppg.push([f.packetNo, f.timestampMs+i, ch1[i], ch2[i]]);
+      }
+    }
+  } else if(f.type==="imu"){
+    const imu = parseImuPayload(f.payload);
+    const n = imu.gx.length;
+    if(n>0){
+      state.imuCount += n;
+      onImuData(imu);
+      if(state.isSaving){
+        for(let i=0;i<n;i++)
+          state.store.imu.push([f.packetNo, f.timestampMs+i,
+            imu.ax[i],imu.ay[i],imu.az[i],imu.gx[i],imu.gy[i],imu.gz[i]]);
+      }
+    }
+  }
+  state.crcErr = state.parser.crcErrors;
+  const total = state.eegCount+state.ppgCount+state.imuCount;
+  if(total>0 && total%500===0) updateStats();
+}
+function handleCommandResponse(cmd){
+  const names={1:"状态获取",2:"设备信息",0x10:"采集启动",0x11:"采集停止",0x12:"参数设置",0x13:"状态读取"};
+  const name = names[cmd.cmdCode]||("指令0x"+cmd.cmdCode.toString(16).toUpperCase());
+  let status="未知";
+  if(cmd.dataLength>=1) status = cmd.payload[0]===0?"成功":("失败(0x"+cmd.payload[0].toString(16).toUpperCase()+")");
+  log("设备响应 ["+name+"]: "+status);
+}
+
+/* ============================================================
+ * 文件加载与回放
+ * ============================================================ */
+async function loadTxtFile(file){
+  log("加载文件: " + file.name);
+  setStatus("正在解析文件...");
+  try{
+    const text = await file.text();
+    const lines = text.split('\n');
+    const stream = [];
+    let validLines = 0;
+    for(const line of lines){
+      const trimmed = line.trim();
+      if(!trimmed || trimmed.startsWith('#')) continue;  // 跳过空行和注释
+      // 格式：时间戳,hex （v2 导出格式）
+      const parts = trimmed.split(',');
+      if(parts.length >= 2){
+        const hexStr = parts[parts.length - 1].trim();
+        try{
+          for(let i=0;i<hexStr.length;i+=2){
+            stream.push(parseInt(hexStr.substr(i,2),16));
+          }
+          validLines++;
+        }catch(e){ /* skip */ }
+      }
+    }
+    log("有效行数: " + validLines + ", 字节数: " + stream.length);
+    if(stream.length === 0){
+      setStatus("文件无有效数据");
+      return;
+    }
+    // 用 FrameParser 解析
+    const parser = new FrameParser();
+    const frames = parser.feed(new Uint8Array(stream));
+    log("解析帧数: " + frames.length);
+    // 分离帧
+    const eegFrames=[], ppgFrames=[], imuFrames=[];
+    let minTs = Infinity, maxTs = -Infinity;
+    for(const f of frames){
+      if(f.type === 'eeg' || f.type === 'ppg' || f.type === 'imu'){
+        if(f.timestampMs < minTs) minTs = f.timestampMs;
+        if(f.timestampMs > maxTs) maxTs = f.timestampMs;
+      }
+      if(f.type === 'eeg') eegFrames.push(f);
+      else if(f.type === 'ppg') ppgFrames.push(f);
+      else if(f.type === 'imu') imuFrames.push(f);
+    }
+    state.playback.frames = frames;
+    state.playback.eegFrames = eegFrames;
+    state.playback.ppgFrames = ppgFrames;
+    state.playback.imuFrames = imuFrames;
+    state.playback.startTime = minTs === Infinity ? 0 : minTs;
+    state.playback.endTime = maxTs === Infinity ? 0 : maxTs;
+    state.playback.totalDuration = (maxTs - minTs) / 1000;
+    state.playback.isLoaded = true;
+    state.playback.mode = 'playback';
+    // 启用回放按钮
+    document.getElementById("play-btn").disabled = false;
+    document.getElementById("stop-btn2").disabled = false;
+    // 更新进度条
+    document.getElementById("play-progress").value = 0;
+    updateTimeDisplay(0);
+    setStatus("文件加载完成：EEG " + eegFrames.length + " 帧, PPG " + ppgFrames.length + " 帧, IMU " + imuFrames.length + " 帧, 时长 " + state.playback.totalDuration.toFixed(1) + "s");
+    log("加载完成：EEG=" + eegFrames.length + ", PPG=" + ppgFrames.length + ", IMU=" + imuFrames.length + ", 时长=" + state.playback.totalDuration.toFixed(1) + "s");
+    // 重置 sweep buffer 显示初始数据
+    resetSweepAndFilters();
+    refreshAllPlots();
+  }catch(e){
+    setStatus("文件加载失败: " + e.message);
+    log("加载失败: " + e.message);
+  }
+}
+function startPlayback(){
+  if(!state.playback.isLoaded) return;
+  state.playback.isPlaying = true;
+  state.playback.playIndex = 0;
+  resetSweepAndFilters();
+  state.playback.currentTime = 0;
+  // 根据速度设置定时器间隔（基础 50ms，速度越高间隔越短）
+  const interval = 50 / state.playback.playSpeed;
+  state.playback.playTimer = setInterval(playbackTick, interval);
+  document.getElementById("play-btn").disabled = true;
+  document.getElementById("pause-btn").disabled = false;
+  setStatus("回放中...");
+  log("开始回放，速度 " + state.playback.playSpeed + "x");
+}
+function pausePlayback(){
+  if(state.playback.playTimer){
+    clearInterval(state.playback.playTimer);
+    state.playback.playTimer = null;
+  }
+  state.playback.isPlaying = false;
+  document.getElementById("play-btn").disabled = false;
+  document.getElementById("play-btn").textContent = "继续";
+  document.getElementById("pause-btn").disabled = true;
+  setStatus("回放已暂停");
+}
+function stopPlayback(){
+  if(state.playback.playTimer){
+    clearInterval(state.playback.playTimer);
+    state.playback.playTimer = null;
+  }
+  state.playback.isPlaying = false;
+  state.playback.playIndex = 0;
+  state.playback.currentTime = 0;
+  document.getElementById("play-btn").disabled = false;
+  document.getElementById("play-btn").textContent = "播放";
+  document.getElementById("pause-btn").disabled = true;
+  document.getElementById("play-progress").value = 0;
+  updateTimeDisplay(0);
+  setStatus("回放已停止");
+  log("停止回放");
+  resetSweepAndFilters();
+  refreshAllPlots();
+}
+// 回放单次 tick：发送一批帧到波形显示
+function playbackTick(){
+  if(!state.playback.isPlaying) return;
+  const pb = state.playback;
+  // 每个 tick 发送一定数量的帧（根据速度调整）
+  const framesPerTick = Math.max(1, Math.floor(pb.playSpeed * 2));
+  let sent = 0;
+  while(sent < framesPerTick && pb.playIndex < pb.frames.length){
+    const f = pb.frames[pb.playIndex];
+    dispatchFramePlayback(f);
+    pb.playIndex++;
+    sent++;
+  }
+  // 更新时间
+  if(pb.playIndex < pb.frames.length){
+    pb.currentTime = (pb.frames[pb.playIndex].timestampMs - pb.startTime) / 1000;
+  } else {
+    pb.currentTime = pb.totalDuration;
+  }
+  // 更新进度条
+  const progress = pb.frames.length > 0 ? (pb.playIndex / pb.frames.length * 1000) : 0;
+  document.getElementById("play-progress").value = progress;
+  updateTimeDisplay(pb.currentTime);
+  // 播放结束
+  if(pb.playIndex >= pb.frames.length){
+    if(pb.playTimer){ clearInterval(pb.playTimer); pb.playTimer = null; }
+    pb.isPlaying = false;
+    document.getElementById("play-btn").disabled = false;
+    document.getElementById("play-btn").textContent = "重播";
+    document.getElementById("pause-btn").disabled = true;
+    setStatus("回放完成");
+    log("回放完成");
+  }
+}
+// 回放模式下的帧分发（不写入 store，只更新波形）
+function dispatchFramePlayback(f){
+  if(f.type === 'eeg'){
+    const [ch1,ch2] = parseEegPayload(f.payload);
+    if(ch1.length > 0){
+      onEegData(ch1, ch2);
+      if(f.leadoff !== null) state.eegLeadoff = f.leadoff;
+    }
+  } else if(f.type === 'ppg'){
+    const [ch1,ch2] = parsePpgPayload(f.payload);
+    if(ch1.length > 0) onPpgData(ch1, ch2);
+  } else if(f.type === 'imu'){
+    const imu = parseImuPayload(f.payload);
+    if(imu.ax.length > 0) onImuData(imu);
+  }
+}
+function updateTimeDisplay(currentSec){
+  const fmt = s => {
+    const m = Math.floor(s/60);
+    const sec = Math.floor(s%60);
+    return String(m).padStart(2,'0') + ":" + String(sec).padStart(2,'0');
+  };
+  document.getElementById("play-time").textContent = fmt(currentSec) + " / " + fmt(state.playback.totalDuration);
+}
+function seekPlayback(progressVal){
+  if(!state.playback.isLoaded) return;
+  const pb = state.playback;
+  const targetIdx = Math.floor(progressVal / 1000 * pb.frames.length);
+  pb.playIndex = Math.max(0, Math.min(targetIdx, pb.frames.length));
+  if(pb.frames.length > 0 && pb.playIndex < pb.frames.length){
+    pb.currentTime = (pb.frames[pb.playIndex].timestampMs - pb.startTime) / 1000;
+  }
+  updateTimeDisplay(pb.currentTime);
+  // 重置 sweep 显示当前位置附近数据
+  resetSweepAndFilters();
+  // 快速填充 sweep buffer：从当前位置向前取 10 秒数据
+  let idx = pb.playIndex;
+  while(idx > 0 && (pb.frames[pb.playIndex].timestampMs - pb.frames[idx].timestampMs) < SHOW_SECONDS * 1000){
+    idx--;
+  }
+  for(let i = idx; i <= pb.playIndex && i < pb.frames.length; i++){
+    dispatchFramePlayback(pb.frames[i]);
+  }
+  refreshAllPlots();
+  log("跳转到 " + pb.currentTime.toFixed(1) + "s");
+}
+
+/* ============================================================
+ * 十二、采集控制
+ * ============================================================ */
+async function sendCmd(cmdArr){
+  if(!state.writeChar) return;
+  const u8 = new Uint8Array(cmdArr);
+  try{
+    if(state.writeChar.writeValueWithoutResponse){
+      await state.writeChar.writeValueWithoutResponse(u8);
+    } else {
+      await state.writeChar.writeValue(u8);
+    }
+    log("发送: "+toHex(cmdArr));
+  }catch(e){
+    // 回退 write-with-response
+    try{ await state.writeChar.writeValueWithResponse(u8); log("发送(响应): "+toHex(cmdArr)); }
+    catch(e2){ log("指令发送失败: "+e2.message); }
+  }
+}
+function toHex(arr){ let s=""; for(const b of arr) s+=b.toString(16).padStart(2,"0").toUpperCase(); return s; }
+
+async function startCollect(){
+  const eegOn = document.getElementById("eeg-cb").checked;
+  const ppgOn = document.getElementById("ppg-cb").checked;
+  const imuOn = document.getElementById("imu-cb").checked;
+  if(!(eegOn||ppgOn||imuOn)){ setStatus("请至少选择一种数据类型"); return; }
+  const eegFs = parseInt(document.getElementById("eeg-fs").value);
+  const ppgFs = parseInt(document.getElementById("ppg-fs").value);
+  const imuFs = parseFloat(document.getElementById("imu-fs").value);
+  const eegGain = parseInt(document.getElementById("eeg-gain").value);
+  const duration = Math.max(0, Math.min(parseInt(document.getElementById("duration").value||"0")||0, 65535));
+  state.eegFs = eegFs; state.ppgFs = ppgFs; state.imuFs = imuFs;
+  // 更新 EEG LSB（按增益）
+  EEG_LSB = (2*EEG_VREF/eegGain)/Math.pow(2,24);
+
+  // 重置画布 + 滤波器 + 统计 + 存储
+  resetSweepAndFilters();
+  state.eegCount=state.ppgCount=state.imuCount=state.crcErr=state.frameCount=0;
+  notifyCount = 0;
+  state.store = {eeg:[], ppg:[], imu:[]};
+  state.rawStore = [];
+  state.rawStartTs = null;
+  state.rawEndTs = null;
+  refreshAllPlots();
+
+  try{
+    const config = buildConfigCmd(eegOn, eegFs, ppgOn, ppgFs, imuOn, imuFs, eegGain, duration, false);
+    log("发送配置指令 0x12...");
+    await sendCmd(config);
+    await sleep(200);
+    log("发送启动指令 0x10...");
+    await sendCmd(buildStartCmd());
+    state.isCollecting = true;
+    state.isSaving = true;
+    state.lastNotifyTs = Date.now();
+    setStatus("采集已启动，等待数据上报...");
+    document.getElementById("export-btn").disabled = true;
+    document.getElementById("export-raw-btn").disabled = true;
+  }catch(e){
+    log("启动采集失败: "+e.message);
+    setStatus("启动采集失败: "+e.message);
+  }
+}
+async function stopCollect(){
+  try{
+    await sendCmd(buildStopCmd());
+  }catch(e){}
+  state.isCollecting = false;
+  state.isSaving = false;
+  setStatus("已停止采集");
+  document.getElementById("export-btn").disabled = (state.store.eeg.length+state.store.ppg.length+state.store.imu.length)===0;
+  document.getElementById("export-raw-btn").disabled = state.rawStore.length===0;
+}
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+/* ============================================================
+ * 十三、CSV 导出
+ * ============================================================ */
+function downloadCSV(filename, rows){
+  const csv = rows.map(r=>r.join(",")).join("\n");
+  const blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+function exportCSV(){
+  const stamp = timestampStr();
+  let exported = 0;
+  if(state.store.eeg.length){
+    const rows = [["packet_no","timestamp_ms","ch1_uV","ch2_uV"]].concat(state.store.eeg);
+    downloadCSV("eeg_"+stamp+".csv", rows);
+    state.store.eeg = [];
+    exported++;
+  }
+  if(state.store.ppg.length){
+    const rows = [["packet_no","timestamp_ms","ch1_raw","ch2_raw"]].concat(state.store.ppg);
+    downloadCSV("ppg_"+stamp+".csv", rows);
+    state.store.ppg = [];
+    exported++;
+  }
+  if(state.store.imu.length){
+    const rows = [["packet_no","timestamp_ms","ax_g","ay_g","az_g","gx_dps","gy_dps","gz_dps"]].concat(state.store.imu);
+    downloadCSV("imu_"+stamp+".csv", rows);
+    state.store.imu = [];
+    exported++;
+  }
+  if(exported === 0){
+    setStatus("无新数据可导出");
+    log("导出跳过：无新数据");
+  } else {
+    setStatus("CSV 已导出（"+exported+" 个文件），缓存已清空");
+    log("导出完成，已清空缓存：eeg="+state.store.eeg.length+", ppg="+state.store.ppg.length+", imu="+state.store.imu.length);
+    document.getElementById("export-btn").disabled = true;
+  }
+}
+function timestampStr(){
+  const d = new Date();
+  const p = n => String(n).padStart(2,"0");
+  return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"_"+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds());
+}
+// 导出原始数据 txt：每行 "iso_local,hex"（与 Python DataSaver.write_raw 一致：逗号分隔）
+function exportRaw(){
+  if(state.rawStore.length === 0){
+    setStatus("无原始数据可导出");
+    log("导出Raw跳过：无数据");
+    return;
+  }
+  const stamp = timestampStr();
+  const text = state.rawStore.join("\n") + "\n";
+  const blob = new Blob([text], {type:"text/plain;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "raw_"+stamp+".txt";
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  const nPkt = state.rawStore.length;
+  const durationMs = (state.rawEndTs||0) - (state.rawStartTs||0);
+  state.rawStore = [];
+  state.rawStartTs = null;
+  state.rawEndTs = null;
+  document.getElementById("export-raw-btn").disabled = true;
+  setStatus("Raw 已导出（"+nPkt+" 包，"+(durationMs/1000).toFixed(1)+"s），缓存已清空");
+  log("Raw 导出完成：" + nPkt + " 包，时长 " + (durationMs/1000).toFixed(3) + "s，缓存已清空");
+}
+// 本地时间格式化：YYYY-MM-DD HH:MM:SS.mmm
+function formatLocalTime(ms){
+  const d = new Date(ms);
+  const p = n => String(n).padStart(2,"0");
+  const p3 = n => String(n).padStart(3,"0");
+  return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "
+       + p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds())+"."+p3(d.getMilliseconds());
+}
+
+/* ============================================================
+ * 十四、滤波器创建（连续滤波，采集启停时重置）
+ * ============================================================ */
+function ensureFilters(){
+  // EEG
+  if(state.filterEnabled.eeg_hp){
+    state.filters.eeg1_hp = createHighpass(state.eegFs, 0.5);
+    state.filters.eeg2_hp = createHighpass(state.eegFs, 0.5);
+  }
+  if(state.filterEnabled.eeg_lp){
+    state.filters.eeg1_lp = createLowpass(state.eegFs, state.eegLpFreq);
+    state.filters.eeg2_lp = createLowpass(state.eegFs, state.eegLpFreq);
+  }
+  if(state.filterEnabled.eeg_notch){
+    state.filters.eeg1_notch = createNotch(state.eegFs, state.notchFreq);
+    state.filters.eeg2_notch = createNotch(state.eegFs, state.notchFreq);
+  }
+  if(state.filterEnabled.ppg_bp){
+    state.filters.ppg1_bp = createBandpass(state.ppgFs, 0.5, 10.0);
+    state.filters.ppg2_bp = createBandpass(state.ppgFs, 0.5, 10.0);
+  }
+  if(state.filterEnabled.acc_lp){
+    state.filters.acc_0_lp = createLowpass(state.imuFs, 5.0);
+    state.filters.acc_1_lp = createLowpass(state.imuFs, 5.0);
+    state.filters.acc_2_lp = createLowpass(state.imuFs, 5.0);
+  }
+  if(state.filterEnabled.gyro_lp){
+    state.filters.gyro_0_lp = createLowpass(state.imuFs, 5.0);
+    state.filters.gyro_1_lp = createLowpass(state.imuFs, 5.0);
+    state.filters.gyro_2_lp = createLowpass(state.imuFs, 5.0);
   }
 }
 
-function onDC() {
-  S.connected = false; S.collecting = false; S.server = null; S.notifyCh = null; S.writeCh = null;
-  log('蓝牙已断开');
-  updateUI();
+/* ============================================================
+ * 十五、状态栏 + 日志
+ * ============================================================ */
+function setStatus(msg){ document.getElementById("status-text").textContent = msg; }
+function updateStats(){
+  document.getElementById("stats-text").textContent =
+    "EEG:"+state.eegCount+"  PPG:"+state.ppgCount+"  IMU:"+state.imuCount+
+    "  帧:"+state.frameCount+"  CRC错误:"+state.crcErr;
+}
+function log(msg){
+  const el = document.getElementById("log");
+  const t = new Date();
+  const p = n => String(n).padStart(2,"0");
+  const ts = p(t.getHours())+":"+p(t.getMinutes())+":"+p(t.getSeconds())+"."+String(t.getMilliseconds()).padStart(3,"0");
+  el.textContent = "["+ts+"] "+msg+"\n" + el.textContent;
+  // 限制长度
+  if(el.textContent.length > 4000) el.textContent = el.textContent.slice(0,4000);
 }
 
-async function doDisconnect() {
-  if (S.device?.gatt?.connected) { S.device.gatt.disconnect(); }
-  onDC();
+/* ============================================================
+ * 十六、UI 初始化
+ * ============================================================ */
+function fillSelect(id, options){
+  const sel = document.getElementById(id);
+  options.forEach(v=>{
+    const opt = document.createElement("option");
+    opt.value = v; opt.textContent = v; sel.appendChild(opt);
+  });
 }
-
-async function doStart() {
-  if (!S.writeCh) return;
-  try {
-    const cmd = getCommand(S.deviceName, 'START_COLLECT');
-    if (S.writeCh.writeValueWithoutResponse) await S.writeCh.writeValueWithoutResponse(cmd);
-    else await S.writeCh.writeValue(cmd);
-    S.collecting = true;
-    startAutoSave();
-    log(`开始采集 (设备类型: ${getDeviceType(S.deviceName)})`);
-    updateUI();
-  } catch(e) { log(`开始失败: ${e.message}`); }
+function fillSelectFromMap(id, map){
+  const sel = document.getElementById(id);
+  const keys = Object.keys(map).map(Number).sort((a,b)=>a-b);
+  keys.forEach(k=>{
+    const opt = document.createElement("option");
+    opt.value = map[k]; opt.textContent = map[k]; sel.appendChild(opt);
+  });
 }
-
-async function doStop() {
-  if (!S.writeCh) return;
-  try {
-    const cmd = getCommand(S.deviceName, 'STOP_COLLECT');
-    if (S.writeCh.writeValueWithoutResponse) await S.writeCh.writeValueWithoutResponse(cmd);
-    else await S.writeCh.writeValue(cmd);
-    await flushThenStop();
-    S.collecting = false;
-    log('停止采集');
-    updateUI();
-  } catch(e) { log(`停止失败: ${e.message}`); }
+function buildAmpButtons(containerId, options, setter, currentVal){
+  const c = document.getElementById(containerId);
+  function updateActive(val){
+    c.querySelectorAll("button.amp").forEach(b=>{
+      b.classList.toggle("active", parseFloat(b.dataset.val) === val);
+    });
+  }
+  options.forEach(v=>{
+    const b = document.createElement("button");
+    b.className = "tech amp"; b.textContent = v;
+    b.dataset.val = v;
+    if(v === currentVal) b.classList.add("active");
+    b.onclick = ()=>{ setter(v); updateActive(v); };
+    c.appendChild(b);
+  });
+  const inp = document.createElement("input");
+  inp.type = "number";
+  inp.className = "tech amp-input";
+  inp.step = "any"; inp.min = "0";
+  inp.value = currentVal;
+  inp.style.width = "56px";
+  inp.title = "手动输入量程";
+  inp.onchange = ()=>{
+    const v = parseFloat(inp.value);
+    if(!isNaN(v) && v > 0){ setter(v); updateActive(-1e9); }
+    else { inp.value = currentVal; }
+  };
+  c.appendChild(inp);
 }
+function initUI(){
+  fillSelect("eeg-fs", EEG_FS_OPTIONS);
+  document.getElementById("eeg-fs").value = EEG_FS_DEFAULT;
+  fillSelect("ppg-fs", PPG_FS_OPTIONS);
+  document.getElementById("ppg-fs").value = PPG_FS_DEFAULT;
+  fillSelect("imu-fs", IMU_FS_OPTIONS);
+  document.getElementById("imu-fs").value = IMU_FS_DEFAULT;
+  // 增益
+  const gsel = document.getElementById("eeg-gain");
+  Object.keys(EEG_GAIN_MAP).map(Number).sort((a,b)=>a-b).forEach(k=>{
+    const opt = document.createElement("option");
+    opt.value = EEG_GAIN_MAP[k]; opt.textContent = EEG_GAIN_MAP[k]; gsel.appendChild(opt);
+  });
+  gsel.value = EEG_GAIN_DEFAULT;
 
-let rawLog = [];
-let lastDataInfo = '';
-function onData(ev) {
-  const bytes = Array.from(new Uint8Array(ev.target.value.buffer));
-  if (!bytes.length) return;
-  rawLog.push(`${localTimestamp()},${bytesToHex(bytes)}`);
+  buildAmpButtons("eeg-amp", AMP_OPTIONS_EEG, v=>{ state.eegYlim=v; if(state.mode==="stacked") state.eegSpacing=2.0*v; else if(state.mode==="centered") state.eegSpacing=0.8*v; applyEegDisplayMode(); state.dirtyEeg=true; }, state.eegYlim);
+  buildAmpButtons("ppg-amp", AMP_OPTIONS_PPG, v=>{ state.ppgYlim=v; if(state.mode==="stacked") state.ppgSpacing=2.0*v; else if(state.mode==="centered") state.ppgSpacing=0.8*v; applyPpgDisplayMode(); state.dirtyPpg=true; }, state.ppgYlim);
+  buildAmpButtons("acc-amp", AMP_OPTIONS_ACC, v=>{ state.accYlim=v; state.dirtyImu=true; }, state.accYlim);
+  buildAmpButtons("gyro-amp", AMP_OPTIONS_GYRO, v=>{ state.gyroYlim=v; state.dirtyImu=true; }, state.gyroYlim);
 
-  try {
-    if (bytes[0] === 0xD0) {
-      S.imuBuf.push(...bytes);
-      const rows = parse185Buffer(S.imuBuf);
-      if (rows.length) { S.imuPkt++; onImuData(rows); }
-    } else if (bytes[0] === 0xC0) {
-      S.eegBuf.push(...bytes);
-      const rows = parseEegBuffer(S.eegBuf);
-      if (rows.length) { S.eegPkt++; onEegData(rows); }
+  applyEegDisplayMode();
+  applyPpgDisplayMode();
+
+  // 按钮事件
+  document.getElementById("scan-btn").onclick = scanDevices;
+  document.getElementById("connect-btn").onclick = connectDevice;
+  document.getElementById("disconnect-btn").onclick = disconnectDevice;
+  document.getElementById("start-btn").onclick = startCollect;
+  document.getElementById("stop-btn").onclick = stopCollect;
+  document.getElementById("export-btn").onclick = exportCSV;
+  document.getElementById("export-raw-btn").onclick = exportRaw;
+
+  // 显示模式
+  document.querySelectorAll(".mode-btn").forEach(b=>{
+    b.onclick = ()=> setDisplayMode(b.dataset.mode);
+  });
+  // 间距微调
+  document.getElementById("eeg-sp-inc").onclick = ()=>{ state.eegSpacing = Math.max(20, state.eegSpacing+20); applyEegDisplayMode(); state.dirtyEeg=true; log("EEG 间距调整: "+state.eegSpacing.toFixed(0)); };
+  document.getElementById("eeg-sp-dec").onclick = ()=>{ state.eegSpacing = Math.max(20, state.eegSpacing-20); applyEegDisplayMode(); state.dirtyEeg=true; };
+  document.getElementById("ppg-sp-inc").onclick = ()=>{ state.ppgSpacing = Math.max(20, state.ppgSpacing+20); applyPpgDisplayMode(); state.dirtyPpg=true; };
+  document.getElementById("ppg-sp-dec").onclick = ()=>{ state.ppgSpacing = Math.max(20, state.ppgSpacing-20); applyPpgDisplayMode(); state.dirtyPpg=true; };
+
+  // 滤波复选框
+  document.getElementById("eeg-hp").onchange = e=>{ state.filterEnabled.eeg_hp=e.target.checked; if(e.target.checked){ state.filters.eeg1_hp=createHighpass(state.eegFs,0.5); state.filters.eeg2_hp=createHighpass(state.eegFs,0.5);} };
+  document.getElementById("eeg-lp").onchange = e=>{ state.filterEnabled.eeg_lp=e.target.checked; const f=parseFloat(document.getElementById("eeg-lp-freq").value)||30; state.eegLpFreq=f; if(e.target.checked){ state.filters.eeg1_lp=createLowpass(state.eegFs,f); state.filters.eeg2_lp=createLowpass(state.eegFs,f);} };
+  document.getElementById("eeg-notch").onchange = e=>{ state.filterEnabled.eeg_notch=e.target.checked; state.notchFreq=parseInt(document.querySelector('input[name="notch-freq"]:checked').value)||50; if(e.target.checked){ state.filters.eeg1_notch=createNotch(state.eegFs,state.notchFreq); state.filters.eeg2_notch=createNotch(state.eegFs,state.notchFreq);} };
+  document.getElementById("ppg-bp").onchange = e=>{ state.filterEnabled.ppg_bp=e.target.checked; if(e.target.checked){ state.filters.ppg1_bp=createBandpass(state.ppgFs,0.5,10.0); state.filters.ppg2_bp=createBandpass(state.ppgFs,0.5,10.0);} };
+  document.getElementById("acc-lp").onchange = e=>{ state.filterEnabled.acc_lp=e.target.checked; if(e.target.checked){ ["acc_0_lp","acc_1_lp","acc_2_lp"].forEach(k=>state.filters[k]=createLowpass(state.imuFs,5.0)); } };
+  document.getElementById("gyro-lp").onchange = e=>{ state.filterEnabled.gyro_lp=e.target.checked; if(e.target.checked){ ["gyro_0_lp","gyro_1_lp","gyro_2_lp"].forEach(k=>state.filters[k]=createLowpass(state.imuFs,5.0)); } };
+
+  setConnState("disconnected");
+  // 初始化空 buffer（用默认采样率，便于显示空网格）
+  resetSweepAndFilters();
+  refreshAllPlots();
+  setStatus("程序启动完成，准备扫描设备");
+  // 回放控件
+  document.getElementById("load-file-btn").onclick = ()=>{
+    document.getElementById("file-input").click();
+  };
+  document.getElementById("file-input").onchange = (e)=>{
+    if(e.target.files.length > 0) loadTxtFile(e.target.files[0]);
+  };
+  document.getElementById("play-btn").onclick = startPlayback;
+  document.getElementById("pause-btn").onclick = pausePlayback;
+  document.getElementById("stop-btn2").onclick = stopPlayback;
+  document.getElementById("play-speed").onchange = (e)=>{
+    state.playback.playSpeed = parseFloat(e.target.value);
+    if(state.playback.isPlaying){
+      // 重新启动定时器以应用新速度
+      clearInterval(state.playback.playTimer);
+      const interval = 50 / state.playback.playSpeed;
+      state.playback.playTimer = setInterval(playbackTick, interval);
     }
-  } catch(e) { log(`解析错误: ${e.message}`); }
-  lastDataInfo = `IMU:${S.imuPkt} EEG:${S.eegPkt}`;
-  document.getElementById('dataInfo').childNodes[0].textContent = lastDataInfo;
+    log("播放速度: " + state.playback.playSpeed + "x");
+  };
+  document.getElementById("play-progress").oninput = (e)=>{
+    seekPlayback(parseFloat(e.target.value));
+  };
+  log("提示: 仅 Chrome/Edge 支持 Web Bluetooth，需通过 localhost 或 HTTPS 访问");
 }
 
-async function clearSession() {
-  if (!confirm('确定要清除所有已保存的数据吗？此操作不可恢复。')) return;
-  rawLog = []; S.imuPkt = 0; S.eegPkt = 0;
-  await clearDB(); stopAutoSave();
-  document.getElementById('dataInfo').childNodes[0].textContent = '等待数据...';
-  log('会话已清除');
-}
-
-// ==================== 滤波 UI ====================
-function toggleFilter(btnId, stateKey, cb) {
-  const btn = document.getElementById(btnId);
-  btn.classList.toggle('active');
-  S[stateKey] = btn.classList.contains('active');
-  cb && cb();
-  recreateFilters();
-}
-
-document.getElementById('eegHpBtn').onclick = () => toggleFilter('eegHpBtn', 'eegHp');
-document.getElementById('eegLpBtn').onclick = () => {
-  toggleFilter('eegLpBtn', 'eegLp');
-  S.eegLpF = Number(document.getElementById('eegLpFreq').value) || 30;
-};
-document.getElementById('eegLpFreq').onchange = () => {
-  S.eegLpF = Number(document.getElementById('eegLpFreq').value) || 30;
-  if (S.eegLp) recreateFilters();
-};
-document.getElementById('eegNotchBtn').onclick = () => { S.notchFreq = 50; toggleFilter('eegNotchBtn', 'eegNotch'); };
-document.getElementById('eegNotch60Btn').onclick = () => { S.notchFreq = 60; toggleFilter('eegNotch60Btn', 'eegNotch'); };
-document.getElementById('accHpBtn').onclick = () => toggleFilter('accHpBtn', 'accHp');
-document.getElementById('gyroHpBtn').onclick = () => toggleFilter('gyroHpBtn', 'gyroHp');
-document.getElementById('ppgHpBtn').onclick = () => toggleFilter('ppgHpBtn', 'ppgHp');
-document.getElementById('hrHpBtn').onclick = () => toggleFilter('hrHpBtn', 'hrHp');
-
-// ==================== 初始化 ====================
-document.addEventListener('DOMContentLoaded', async () => {
-  preCheck();
-  showPageUrl();
-  recreateFilters();
-  updateUI();
-
-  try { await openDB(); log('IndexedDB 打开成功'); } catch(e) { log(`IndexedDB 打开失败: ${e.message}`); }
-
-  log('页面已加载，点击扫描设备');
-
-  document.getElementById('scanBtn').onclick = () => doScan(false);
-  document.getElementById('scanAllBtn').onclick = () => doScan(true);
-  document.getElementById('connectBtn').onclick = doConnect;
-  document.getElementById('disconnectBtn').onclick = doDisconnect;
-  document.getElementById('startBtn').onclick = doStart;
-  document.getElementById('stopBtn').onclick = doStop;
-  document.getElementById('exportBtn').onclick = doExport;
-  document.getElementById('clearBtn').onclick = clearSession;
+/* ============================================================
+ * 十七、定时器：30fps 重绘 + 心跳/统计
+ * ============================================================ */
+window.addEventListener("resize", ()=>{ state.dirtyEeg=state.dirtyPpg=state.dirtyImu=true; });
+window.addEventListener("load", ()=>{
+  initUI();
+  // 30fps 节流重绘
+  setInterval(()=>{
+    redrawAll();
+  }, 33);
+  // 统计 + 心跳（2s）
+  setInterval(()=>{
+    updateStats();
+    // notify 超时检查
+    if(state.isCollecting && state.lastNotifyTs){
+      const dt = (Date.now()-state.lastNotifyTs)/1000;
+      if(dt>5) setStatus("⚠ "+dt.toFixed(0)+"s 无数据，请检查设备状态");
+      else if(dt>2) setStatus("数据延迟 "+dt.toFixed(1)+"s");
+    }
+  }, 2000);
 });
 </script>
 </body>
